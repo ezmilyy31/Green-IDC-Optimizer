@@ -1,0 +1,61 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - forecast-service
+      - control-service
+      - simulation-service
+    volumes:
+      - ./data:/app/data
+
+  forecast-service:
+    build:
+      context: .
+      dockerfile: docker/forecast.Dockerfile
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+
+  control-service:
+    build:
+      context: .
+      dockerfile: docker/control.Dockerfile
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+
+  simulation-service:
+    build:
+      context: .
+      dockerfile: docker/simulation.Dockerfile
+    ports:
+      - "8003:8003"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard.Dockerfile
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    depends_on:
+      - api
+    volumes:
+      - ./data:/app/data

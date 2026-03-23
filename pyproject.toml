@@ -1,0 +1,53 @@
+[project]
+name = "ai-green-idc"
+version = "0.1.0"
+description = "AI Green IDC - 데이터센터 지능형 냉각/전력 최적화 시스템"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic",
+  "pydantic-settings",
+  "httpx",
+  "requests",
+  "pandas",
+  "numpy",
+  "python-dotenv",
+  "pyarrow",
+  "scikit-learn",
+]
+
+[project.optional-dependencies]
+forecast = [
+  "lightgbm",
+  "torch",
+]
+control = [
+  "gymnasium",
+  "stable-baselines3",
+  "scipy",
+]
+dashboard = [
+  "streamlit",
+  "plotly",
+  "altair",
+]
+
+[dependency-groups]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+  "black",
+  "mypy",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.black]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
