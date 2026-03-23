@@ -40,12 +40,16 @@ services:
     build:
       context: .
       dockerfile: docker/simulation.Dockerfile
+    platform: linux/amd64
     ports:
       - "8003:8003"
     env_file:
       - .env
     volumes:
       - ./data:/app/data
+      - .:/app
+    working_dir: /app
+    command: python apps/simulation_service/test_sinergym.py # Sinergym 테스트를 위함.
 
   dashboard:
     build:

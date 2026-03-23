@@ -22,6 +22,15 @@
 
 ## docker 실행
 
+### simulation-service 실행 (sinergym)
+```
+docker compose up --build simulation-service
+```
+
+테스트를 위해 `docker-compose.yml`에서 `app/simulation_service/test_sinergym.py`를 실행하도록 설정해 둠.
+
+### 그 외 실행
+
 ```
 // 전체 실행
 docker compose up --build 
