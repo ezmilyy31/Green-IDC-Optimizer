@@ -17,3 +17,6 @@ data/models/
 .DS_Store
 .idea/
 .vscode/
+
+# sinergym 
+Eplus-datacenter_dx-mixed-continuous-stochastic-v1-*
