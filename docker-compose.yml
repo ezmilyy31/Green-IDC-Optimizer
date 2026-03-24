@@ -49,7 +49,7 @@ services:
       - ./data:/app/data
       - .:/app
     working_dir: /app
-    command: python apps/simulation_service/test_sinergym.py # Sinergym 테스트를 위함.
+    command: python3 apps/simulation_service/test_sinergym.py # Sinergym 테스트를 위함.
 
   dashboard:
     build:
