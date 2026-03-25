@@ -44,7 +44,7 @@ def calculate_setpoint(cooling_mode: CoolingMode, outdoor_temp_c: float) -> floa
 
 def run_rule_based(
     outdoor_temp_c: float,
-    outdoor_humidity_pct: float,
+    outdoor_humidity: float,
     it_power_kw: float) -> RuleBasedResult:
     # 함수 조합 -> 최종 결과 반환
 
