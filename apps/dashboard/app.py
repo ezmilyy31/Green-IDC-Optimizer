@@ -22,6 +22,8 @@ from apps.dashboard.api_client import (
     optimize_control,
     rl_control,
 )
+
+# 이후 simulation-service REST API로 교체필요.
 from domain.thermodynamics.chiller import calculate_chiller_power_kw
 from domain.thermodynamics.cooling_load import (
     AIR_SPECIFIC_HEAT_KJ_PER_KG_K,
@@ -40,16 +42,16 @@ TEMP_WARNING_THRESHOLD_C = 27.0   # 서버 환기 온도 경고 기준 (ASHRAE A
 NUM_RACKS                = 40
 NAVER_PUE_BENCHMARK      = 1.09
 
-# ESG 계수 (명세서 기준)
+# ESG 계수 (명세서+thermodynamic_model.md 기준)
 CARBON_FACTOR_TCO2_PER_MWH  = 0.459   # 한국 전력 탄소 배출계수
 ELECTRICITY_COST_KRW_PER_KWH = 120.0  # 산업용 전기요금 (원/kWh)
 WUE_BY_MODE = {                        # 냉각 모드별 물 사용량 (L/kWh IT)
-    "chiller":      1.5,
-    "hybrid":       0.8,
+    "chiller":      1.8,
+    "hybrid":       0.0,
     "free_cooling": 0.2,
 }
 
-# 위기 시나리오 정의 (명세서 9항 기준)
+# 위기 시나리오 정의 (명세서 기준)
 CRISIS_CONFIGS: dict[str, dict] = {
     None: {
         "label":          "정상",
@@ -91,6 +93,13 @@ WORKLOAD_PROFILE = [
     0.72, 0.65, 0.58, 0.50, 0.42, 0.38,   # 18~23: 야간 감소
 ]
 
+# 위기 시나리오별 대응 전략 (명세서 기준)
+CRISIS_STRATEGIES = {
+    "server_surge":    "칠러 추가 가동 + 공급 온도 1도 하향",
+    "chiller_failure": "IT 부하 분산 요청 + Free Cooling 최대화",
+    "heat_wave":       "칠러 전력 증가 + 공급 온도 최저화 (16°C)",
+}
+
 COOLING_MODE_LABELS = {"chiller": "기계식", "free_cooling": "자연공조", "hybrid": "혼합"}
 COOLING_MODE_COLORS = ["#E74C3C", "#2ECC71", "#F39C12"]
 
@@ -100,6 +109,7 @@ PUE_GAUGE_STEPS = [
     {"range": [1.8, 2.5], "color": "#fdecea"},
 ]
 
+# 명세서 출처
 PUE_BENCHMARKS = [
     ("NAVER 각 춘천", "1.09"),
     ("Google 글로벌",  "1.10"),
@@ -167,7 +177,7 @@ def run_simulation(
 
     return pd.DataFrame(rows)
 
-
+# 현재 구현하지 않아도 되는 내용. 나중에 수정
 def calculate_esg(df: pd.DataFrame) -> dict:
     """24시간 시뮬레이션 결과로 ESG 지표를 계산한다."""
     total_energy_kwh = df["총 전력 (kW)"].sum()   # 시간당 → 24h 합계 (kWh)
@@ -421,6 +431,14 @@ over_threshold = sum(1 for t in rack_temps if t > TEMP_WARNING_THRESHOLD_C)
 
 esg = calculate_esg(df)
 
+# 위기 시나리오 활성 시 정상 기준값 계산 (비용 증가분 비교용)
+if crisis_mode:
+    df_base  = run_simulation(scenario, num_cpu_servers, num_gpu_servers, cpu_utilization, supply_temp, None)
+    esg_base = calculate_esg(df_base)
+    avg_pue_base = df_base["PUE"].mean()
+else:
+    df_base = esg_base = avg_pue_base = None
+
 # Control Service 호출 — 피크 시간 기준 외기온도 + IT 전력으로 제어 추천 요청
 peak_it_power = df.loc[peak_idx, "IT 전력 (kW)"]
 ctrl_rule = optimize_control(current_outdoor, peak_it_power)
@@ -570,6 +588,26 @@ with col_alarm:
     if st.button("알람 초기화"):
         st.session_state.alarms = []
         st.rerun()
+
+# ── 위기 시나리오 분석 (활성화 시만 표시) ────────────────────────────────
+
+if crisis_mode and df_base is not None:
+    st.divider()
+    st.subheader(f"🚨 위기 시나리오 분석 — {cfg['label']}")
+
+    s1, s2, s3, s4 = st.columns(4)
+
+    pue_delta  = avg_pue - avg_pue_base
+    cost_delta = esg["cost_krw_day"] - esg_base["cost_krw_day"]
+    carbon_delta = esg["carbon_tco2_day"] - esg_base["carbon_tco2_day"]
+    it_delta_pct = (df["IT 전력 (kW)"].mean() / df_base["IT 전력 (kW)"].mean() - 1) * 100
+
+    s1.metric("PUE 변화",       f"{avg_pue:.3f}",          f"{pue_delta:+.3f} vs 정상", delta_color="inverse")
+    s2.metric("전력 비용 증가",  f"{esg['cost_krw_day']:.1f} 만원", f"{cost_delta:+.2f} 만원",  delta_color="inverse")
+    s3.metric("탄소 배출 증가",  f"{esg['carbon_tco2_day']:.3f} tCO₂", f"{carbon_delta:+.3f} tCO₂", delta_color="inverse")
+    s4.metric("IT 부하 변화",    f"{df['IT 전력 (kW)'].mean():.0f} kW", f"{it_delta_pct:+.1f}%",  delta_color="inverse")
+
+    st.info(f"💡 **권장 대응 전략:** {CRISIS_STRATEGIES.get(crisis_mode, '-')}")
 
 st.divider()
 
