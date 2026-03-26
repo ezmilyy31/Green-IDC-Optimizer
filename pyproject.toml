@@ -16,6 +16,7 @@ dependencies = [
   "python-dotenv",
   "pyarrow",
   "scikit-learn",
+  "lightgbm>=4.6.0",
 ]
 
 [project.optional-dependencies]
