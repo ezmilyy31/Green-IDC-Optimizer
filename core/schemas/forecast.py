@@ -18,6 +18,10 @@ class CoolingMode(str, Enum):
     HYBRID = "hybrid"
     CHILLER = "chiller"
 
+class ModelType(str, Enum):
+    LGBM = "lgbm"
+    LSTM = "lstm"
+
 # Request ##############################################
 
 """
@@ -25,6 +29,7 @@ class CoolingMode(str, Enum):
 """
 class ForecastRequest(BaseModel):
     prediction_target: PredictionTarget = PredictionTarget.BOTH
+    model_type: ModelType = ModelType.LGBM
     forecast_horizon_hours: int = Field(..., ge=1, le=168)
     current_timestamp: datetime | None = None
     include_prediction_interval: bool = True
