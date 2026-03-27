@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, status, JSONResponse
 
-from core.schemas.forecast import ForecastRequest, ForecastPoint, ForecastResponse, ErrorResponse
+from core.schemas.forecast import ForecastRequest, ForecastPoint, ForecastResponse, ErrorResponse, HealthResponse
 from services.forecast import run_forecast
 from models.loader import load_model_bundle
 
@@ -35,11 +35,10 @@ async def lifespan(app: FastAPI):
     app.state.model_load_error = None
     print("[forecast-service] shutdown completed.")
 
-
-
 app = FastAPI(
     title="Forecast Service",
     description="IT 부하 및 냉각 수요 예측 API",
+    lifespan=lifespan,
 )
 
 """
@@ -64,10 +63,17 @@ POST /api/v1/forecast
     - 냉각 방식별 에너지 소비량을 비교 분석해야 한다.
 """
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "forecast-service"}
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
+def health(request: Request) -> HealthResponse:
+    ready = getattr(request.app.state, "model_bundle", None) is not None
+    model_load_error = getattr(request.app.state, "model_load_error", None)
 
+    return HealthResponse(
+        status="ok",
+        service="forecast-service",
+        model_ready=ready,
+        model_load_error=model_load_error,
+    )
 
 @app.post(
     "/api/v1/forecast",
@@ -92,17 +98,18 @@ def forecast(payload: ForecastRequest, request: Request) -> ForecastResponse:
 
     # FastAPI app.state에 저장되어 있는 모델 번들을 가져옴
     # 보통 startup 시점에 모델을 로드해서 app.state.model_bundle에 저장해 둠
-    model_bundle = request.app.state.model_bundle
+    model_bundle = getattr(request.app.state, "model_bundle", None)
+    model_load_error = getattr(request.app.state, "model_load_error", None)
 
     # 모델 번들이 없으면 아직 모델이 로드되지 않은 상태 
     if model_bundle is None:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error_code": "MODEL_NOT_READY",
-                "message": "Forecast model is not loaded.",
-                "detail": request.app.state.model_load_error,
-            },
+            content=ErrorResponse(
+                error_code="MODEL_NOT_READY",
+                message="Forecast model is not loaded.",
+                detail=model_load_error,
+            ).model_dump(),
         )
 
     try:
@@ -113,21 +120,21 @@ def forecast(payload: ForecastRequest, request: Request) -> ForecastResponse:
         return result
 
     except ValueError as exc:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error_code": "INVALID_REQUEST",
-                "message": "Invalid forecast request.",
-                "detail": str(exc),
-            },
-        ) from exc
+            content=ErrorResponse(
+                error_code="INVALID_REQUEST",
+                message="Invalid forecast request.",
+                detail=str(exc),
+            ).model_dump(),
+        )
 
     except Exception as exc:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "error_code": "FORECAST_FAILED",
-                "message": "Unexpected error occurred during forecast.",
-                "detail": str(exc),
-            },
-        ) from exc
+            content=ErrorResponse(
+                error_code="FORECAST_FAILED",
+                message="Unexpected error occurred during forecast.",
+                detail=str(exc),
+            ).model_dump(),
+        )

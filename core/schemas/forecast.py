@@ -45,13 +45,17 @@ class ForecastPoint(BaseModel):
     predicted_it_load_kw: float | None = None
     predicted_cooling_load_kw: float | None = None
     cooling_mode: CoolingMode | None = None
-    lower_bound_kw: float | None = None
-    upper_bound_kw: float | None = None
+    lower_bound_it_load_kw: float | None = None
+    upper_bound_it_load_kw: float | None = None
+    lower_bound_cooling_load_kw: float | None = None
+    upper_bound_cooling_load_kw: float | None = None
 
 """
 `/api/v1/forecast`의 최종 response schema
 """
 class ForecastResponse(BaseModel):
+    prediction_target: PredictionTarget
+    model_type_used: ModelType
     generated_at: datetime
     horizon_hours: int
     predictions: list[ForecastPoint]
@@ -64,4 +68,8 @@ class ErrorResponse(BaseModel):
     message: str
     detail: str | None = None
 
-
+class HealthResponse(BaseModel):
+    status: str
+    service: str
+    model_ready: bool
+    model_load_error: str | None = None
