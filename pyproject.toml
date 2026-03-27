@@ -17,6 +17,9 @@ dependencies = [
   "pyarrow",
   "scikit-learn",
   "lightgbm>=4.6.0",
+  "torch>=2.10.0",
+  "torchvision>=0.25.0",
+  "torchaudio>=2.11.0",
 ]
 
 [project.optional-dependencies]
