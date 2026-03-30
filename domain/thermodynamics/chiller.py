@@ -69,8 +69,8 @@ def calculate_chiller_power_kw(
 
     냉각 모드 결정 (명세서 기준):
       - 외기 < 15°C: Free Cooling (자연공조) — 칠러 미사용
-      - 15°C ≤ 외기 < 22°C: Hybrid (혼합) — 칠러 일부 사용
-      - 외기 ≥ 22°C: Chiller (기계식) — 칠러 전면 가동
+      - 15°C ≤ 외기 ≤ 22°C: Hybrid (혼합) — 칠러 일부 사용
+      - 외기 > 22°C: Chiller (기계식) — 칠러 전면 가동
 
     공식 (기계식 모드):
       P_chiller = Q_cooling / COP
@@ -95,7 +95,7 @@ def calculate_chiller_power_kw(
         # 자연공조: 기계식 칠러 미사용
         chiller_power_kw = 0.0
 
-    elif outdoor_temp_c < HYBRID_THRESHOLD_C:
+    elif outdoor_temp_c <= HYBRID_THRESHOLD_C:
         # 혼합 모드: 외기 온도에 따라 칠러 비중을 선형 보간
         # 15°C에서 0% 칠러, 22°C에서 100% 칠러
         chiller_fraction = (outdoor_temp_c - FREE_COOLING_THRESHOLD_C) / (
