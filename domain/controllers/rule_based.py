@@ -55,7 +55,7 @@ def run_rule_based(
     if cooling_mode == CoolingMode.FREE_COOLING:
         ratio =  1.0
     elif cooling_mode == CoolingMode.HYBRID:
-        ratio = 1 - (outdoor_temp_c - 15) / (22 - 15)
+        ratio = 1 - (outdoor_temp_c - FREE_COOLING_THRESHOLD_C) / (HYBRID_THRESHOLD_C - FREE_COOLING_THRESHOLD_C)
     else: ratio = 0.0
 
 
