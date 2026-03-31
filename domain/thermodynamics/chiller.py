@@ -12,7 +12,7 @@
 
 from dataclasses import dataclass
 from core.config.enums import CoolingMode
-from core.config.settings import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
+from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 
 
 @dataclass

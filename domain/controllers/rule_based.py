@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from core.config.enums import CoolingMode
-from core.config.settings import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
+from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 # CoolingMode.FREE_COOLING / HYBRID / CHILLER (이미 정의된 ENUM type 냉각 모드)
 # 15도 이하 -> 자연 공조 / 15도 초과 22도 이하 HYBRID / 22도 이상 기계식 냉방 <free cooling> 기준 
 
