@@ -11,13 +11,8 @@
 """
 
 from dataclasses import dataclass
-from enum import Enum
-
-
-class CoolingMode(str, Enum):
-    CHILLER = "chiller"           # 기계식 냉방 (칠러 가동)
-    FREE_COOLING = "free_cooling" # 자연공조 (외기로 직접 냉각)
-    HYBRID = "hybrid"             # 혼합 (부분 자연공조 + 칠러 보조)
+from core.config.enums import CoolingMode
+from core.config.settings import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 
 
 @dataclass
@@ -27,12 +22,6 @@ class ChillerResult:
     cop: float                  # 성능계수 (무차원)
     chiller_power_kw: float     # 칠러 전력 소비량 (kW)
     cooling_mode: CoolingMode   # 냉각 모드
-
-
-# 냉각 모드 전환 온도 기준 (°C) — 명세서 기준
-FREE_COOLING_THRESHOLD_C = 15.0   # 이하: 완전 자연공조
-HYBRID_THRESHOLD_C = 22.0         # 이하: 혼합 모드
-
 
 def calculate_cop(outdoor_temp_c: float) -> float:
     """

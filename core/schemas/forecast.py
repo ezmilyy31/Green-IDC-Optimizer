@@ -1,26 +1,11 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
+from core.config.enums import CoolingMode, PredictionTarget, ModelType
 
 """
 Forecast Service에서 사용하는 Pydantic 스키마 정의 파일.
 """
-
-# Enum #################################################
-
-class PredictionTarget(str, Enum):
-    IT_LOAD = "it_load"
-    COOLING_DEMAND = "cooling_demand"
-    BOTH = "both"
-
-class CoolingMode(str, Enum):
-    FREE_COOLING = "free_cooling"
-    HYBRID = "hybrid"
-    CHILLER = "chiller"
-
-class ModelType(str, Enum):
-    LGBM = "lgbm"
-    LSTM = "lstm"
 
 # Request ##############################################
 

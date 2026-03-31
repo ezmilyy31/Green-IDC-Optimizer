@@ -4,8 +4,8 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from core.schemas.forecast import ForecastRequest, ForecastResponse, ErrorResponse, HealthResponse
-from .services.forecast import run_forecast
-from .models.loader import load_model_bundle
+from apps.forecast_service.services.forecast import run_forecast
+from apps.forecast_service.models.loader import load_model_bundle
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

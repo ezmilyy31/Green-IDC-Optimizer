@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from domain.thermodynamics.chiller import CoolingMode
+from core.config.enums import CoolingMode
+from core.config.settings import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 # CoolingMode.FREE_COOLING / HYBRID / CHILLER (이미 정의된 ENUM type 냉각 모드)
 # 15도 이하 -> 자연 공조 / 15도 초과 22도 이하 HYBRID / 22도 이상 기계식 냉방 <free cooling> 기준 
 
@@ -17,9 +18,9 @@ free_cooling.py에서 제시하는 온도전환 기준으로 CoolingMode 설정
 
 def decide_cooling_mode(outdoor_temp_c: float) -> CoolingMode:
     # 온도 임계 값 기반 Free_COOLING / HYBRID / CHILLER
-    if (outdoor_temp_c < 15):
+    if (outdoor_temp_c < FREE_COOLING_THRESHOLD_C):
         return CoolingMode.FREE_COOLING
-    elif (outdoor_temp_c <= 22):
+    elif (outdoor_temp_c <= HYBRID_THRESHOLD_C):
         return CoolingMode.HYBRID 
     else:
         return CoolingMode.CHILLER
