@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, status, JSONResponse
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
-from core.schemas.forecast import ForecastRequest, ForecastPoint, ForecastResponse, ErrorResponse, HealthResponse
-from services.forecast import run_forecast
-from models.loader import load_model_bundle
+from core.schemas.forecast import ForecastRequest, ForecastResponse, ErrorResponse, HealthResponse
+from .services.forecast import run_forecast
+from .models.loader import load_model_bundle
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -116,7 +118,7 @@ def forecast(payload: ForecastRequest, request: Request) -> ForecastResponse:
         # 실제 예측 로직은 서비스 계층 함수(run_forecast)에 위임
         # payload: 사용자가 보낸 예측 요청 데이터
         # model_bundle: 미리 로드된 모델, 스케일러, 메타데이터 등
-        result = run_forecast(payload=payload, model_bundle=model_bundle)
+        result = run_forecast(model_bundle=model_bundle, request=payload)
         return result
 
     except ValueError as exc:
