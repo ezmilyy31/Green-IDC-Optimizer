@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-
+from core.config.enums import CoolingMode
 
 class ControlRequest(BaseModel):
     outdoor_temp_c: float           # 외기 온도 (°C), 냉각 모드 결정
@@ -13,7 +13,7 @@ class ControlRequest(BaseModel):
 
 
 class ControlResponse(BaseModel):
-    cooling_mode: str                        # 냉각 방식 (free_cooling/hybrid/chiller)
+    cooling_mode: CoolingMode                        # 냉각 방식 (free_cooling/hybrid/chiller)
     supply_air_temp_setpoint_c: float        # 공조기 목표 온도 (°C)
     free_cooling_ratio: float                # 자연냉각 비율 (0.0~1.0), ESG 지표 계산
     expected_pue: float = 1.35              # 예상 PUE, TODO: simulation_service 연동 후 교체
