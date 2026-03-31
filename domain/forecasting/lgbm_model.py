@@ -101,6 +101,8 @@ class LGBMForecaster:
         valid_df: pd.DataFrame | None = None,
         eval_set: list[tuple[pd.DataFrame, pd.Series | np.ndarray]] | None = None,
         categorical_features: Sequence[str] | None = None,
+
+        # TODO: 과적합 방지를 위한 early_stopping 내용 추가해야 함.
     ) -> "LGBMForecaster":
         """
         모델을 학습한다.
