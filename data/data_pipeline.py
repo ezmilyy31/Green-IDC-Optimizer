@@ -209,12 +209,14 @@ class SyntheticIDCBuilder:
         """열역학 기반 냉각 부하 계산"""
         m_air = 50  # kg/s (공기 유량)
         c_p = 1.005  # kJ/kg·K (공기 비열)
+        #import extern
         return m_air * c_p * (return_temp - supply_temp)
     
     def calculate_chiller_power(self, cooling_load, outside_temp):
         """COP 기반 칠러 전력 계산"""
         # COP = 6.0 - 0.1 * (outside_temp - 15)
         cop = max(2.0, 6.0 - 0.1 * (outside_temp - 15))
+        #import extern
         return cooling_load / cop
     
     def generate_dataset(self):
@@ -254,9 +256,9 @@ class SyntheticIDCBuilder:
         df['free_cooling_available'] = df['outside_temp'] < 15
 
         # 냉방도일 (Cooling Degree Days) — 기준온도 18°C
-        BASE_TEMP = 18
-        daily_avg_temp = df.groupby(df['timestamp'].dt.date)['outside_temp'].transform('mean')
-        df['cooling_degree_days'] = (daily_avg_temp - BASE_TEMP).clip(lower=0)
+        #BASE_TEMP = 18
+        #daily_avg_temp = df.groupby(df['timestamp'].dt.date)['outside_temp'].transform('mean')
+        #df['cooling_degree_days'] = (daily_avg_temp - BASE_TEMP).clip(lower=0)
 
         return df
 
