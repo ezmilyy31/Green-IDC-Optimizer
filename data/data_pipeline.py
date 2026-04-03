@@ -5,12 +5,113 @@ import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from domain.thermodynamics.cooling_load import(
+    calculate_cooling_load_from_it_power_kw,
+    calculate_cooling_load_from_airflow_kw,
+    calculate_m_air_for_servers,    
+)
+
+from domain.thermodynamics.chiller import (
+    calculate_chiller_power_kw,
+    calculate_cop,
+    ChillerResult,
+    CoolingMode,
+)
+
+from domain.thermodynamics.free_cooling import (
+    calculate_free_cooling,
+    calculate_free_cooling_efficiency,
+    FreeCoolingResult,
+)
+
+from domain.thermodynamics.it_power import (
+    calculate_total_it_power_kw,
+    calculate_server_power_w,
+    ServerSpec,
+    ServerType,
+    CPU_SERVER,
+    GPU_SERVER,
+)
+
+from domain.thermodynamics.pue import calculate_pue, PUEResult, PUE_BENCHMARK
 
 lunar_year = [31,29,31,30,31,30,31,31,30,31,30,31]
 norm_year = [31,28,31,30,31,30,31,31,30,31,30,31]
 
+class Cluster:
+    def __init__ (self):
+        self.dff = pd.DataFrame()
+
+    def read_file(self):
+        df = pd.read_parquet('raw/cluster_trace_5min.parquet')
+        print('Sorting by time...')
+
+        df_sorted = df.sort_values('timestamp', ascending=True)
+        #df_sorted.to_csv('raw/borg_traces_data.csv', index=False)
+        print('Done. Shape:', df_sorted.shape)
+        print('First 3 timestamps:', df_sorted['timestamp'].head(20).tolist())
+        print('Last 3 timestamps:', df_sorted['timestamp'].tail(21).tolist())
+        self.dff = df
+
+    def extend_to_year(self, target_days=366):
+    #28일 데이터를 1년으로 확장 (반복 + 노이즈 + 계절 트렌드)
+    
+        chunks = []
+        repeats = target_days // 28 + 1  # 약 13번 반복
+    
+        for i in range(repeats):
+            chunk = self.dff.copy()
+        
+            # 1) 가우시안 노이즈 추가 (±5~10%)
+            noise = np.random.normal(1.0, 0.05, len(chunk))
+            chunk['avg_cpu'] = (chunk['avg_cpu'] * noise).clip(0, 1)
+            chunk['avg_mem'] = (chunk['avg_mem'] * noise).clip(0, 1)
+            
+            # 2) 계절 트렌드 추가 (여름에 부하 약간 상승)
+            month = (i % 12) + 1  # 1~12월 매핑
+            seasonal_factor = 1.0 + 0.1 * np.sin(2 * np.pi * (month - 1) / 12)
+            # 7월(month=7)에 +10%, 1월(month=1)에 -10%
+            chunk['avg_cpu'] = (chunk['avg_cpu'] * seasonal_factor).clip(0, 1)
+            
+            chunks.append(chunk)
+    
+        print(len(chunks))
+        result = pd.concat(chunks, ignore_index=True)[:target_days * 288]  # 5분 단위
+        # 3) 타임스탬프 재생성
+        result['timestamp'] = pd.date_range(
+            start='2024-01-01', periods=len(result), freq='5min'
+        )
+        print(result.head(3))
+        print(result.tail(3))
+        self.dff = result
+    
+    def extract_file(self):
+        df_final = self.dff.copy()
+        df_final.to_parquet("processed/cluster_trace_5min.parquet", index=False)
+        print("저장 완료! →  processed/cluster_trace_5min.parquet")
+        df_final.to_csv("processed/cluster_trace_5min.csv", index=False)
+        print("저장 완료! →  processed/cluster_trace_5min.csv")
+
+        print(df_final.head())
+        print(df_final.tail())
+        print(df_final.dtypes)
+
+        # 잘 저장됐는지 확인
+        df_check = pd.read_parquet("processed/cluster_trace_5min.parquet")
+        print(f"불러오기 확인: {df_check.shape}")
+        return df_final
+    
+    def cl_generate_dataset(self):
+        self.read_file()
+        self.extend_to_year(366)
+        df = self.extract_file()
+        #print(df.head(5))
+        #print(df.tail(5))
+        return df
+
+
 class Weather:
-    def __init__(self, year=2019, month=3, station_id=101):
+    def __init__(self, year=2024, month=12, station_id=101):
         self.year = year
         self.month = month
         self.station_id = station_id
@@ -148,18 +249,18 @@ class Weather:
 
 
 class SyntheticIDCBuilder:
-    def __init__(self, num_servers=500, days=90):
+    def __init__(self, num_servers=500, days=366):
         self.num_servers = num_servers
         self.days = days
         self.time_steps = days * 24 * 12  # 5분 단위
+        self.cluster = Cluster()
         self.weather = Weather()
         
     def load_workload_pattern(self):
         """Google Cluster Trace에서 워크로드 패턴 로드"""
-        df = pd.read_parquet("raw/cluster_trace_5min.parquet")
+        df = self.cluster.cl_generate_dataset()
         # 시간대별 평균 CPU 사용률 패턴 추출
-        hourly_pattern = df.groupby(df['timestamp'].dt.hour)['avg_cpu'].mean()
-        return hourly_pattern
+        return df
     
     def load_weather_data(self, year, station_id):
         """기상청 API에서 기상 데이터 로드"""
@@ -168,13 +269,13 @@ class SyntheticIDCBuilder:
         days = 0
         for i in range(12):
             if year % 4 == 0:
-                days += lunar_year[i]
+                days += lunar_year[months]
+                months+=1
             else:
-                days += norm_year[i]
-            if days > self.days:
-                months = i+1
-                break
+                days += norm_year[months]
+                months+=1
         
+        print("months", months)
         self.weather = Weather(year, months, station_id)
         return self.weather.generate_dataset()
     
@@ -231,15 +332,15 @@ class SyntheticIDCBuilder:
         P_idle = spec_data["p_idle_w"].mean() # spec 데이터의 평균으로 계산
         P_max = spec_data["p_max_w"].mean() # spec 데이터의 평균으로 계산
         
-        hourly_workload_pattern = self.load_workload_pattern() #Google Cluster 시간대별 사용량
+        cpu_util = self.load_workload_pattern() #Google Cluster 시간대별 사용량
         weather_data = self.load_weather_data(2024, 101) #2024년 춘천 (5분 단위로 보간됨)
         weather_data = weather_data.set_index("timestamp").reindex(timestamps).interpolate(method="linear").reset_index()
 
         data = {
             'timestamp': timestamps,
-            'cpu_utilization': np.random.uniform(0.3, 0.8, self.time_steps),
-            'outside_temp': weather_data["outdoor_temp_c"].values,
-            'outside_humidity': weather_data["outdoor_humidity"].values,
+            'cpu_utilization': cpu_util["avg_cpu"].values,
+            'outside_temp_c': weather_data["outdoor_temp_c"].values,
+            'outside_humidity_pct': weather_data["outdoor_humidity"].values,
         }
         
         df = pd.DataFrame(data)
@@ -250,10 +351,12 @@ class SyntheticIDCBuilder:
             lambda x: self.calculate_cooling_load(x['it_power_kw'], 18, 27), axis=1
         )
         df['chiller_power_kw'] = df.apply(
-            lambda x: self.calculate_chiller_power(x['cooling_load_kw'], x['outside_temp']), axis=1
+            lambda x: self.calculate_chiller_power(x['cooling_load_kw'], x['outside_temp_c']), axis=1
         )
         df['pue'] = (df['it_power_kw'] + df['chiller_power_kw']) / df['it_power_kw']
-        df['free_cooling_available'] = df['outside_temp'] < 15
+        df['free_cooling'] = (
+            (df['outside_temp_c'] >= 15).astype(int) + (df['outside_temp_c'] > 22).astype(int) # 0: Free Cooling, 1: Hybrid, 2: Chiller
+        )
 
         # 냉방도일 (Cooling Degree Days) — 기준온도 18°C
         #BASE_TEMP = 18
@@ -263,7 +366,7 @@ class SyntheticIDCBuilder:
         return df
 
 # 사용 예시
-builder = SyntheticIDCBuilder(num_servers=500, days=90)
+builder = SyntheticIDCBuilder(num_servers=500, days=366)
 dataset = builder.generate_dataset()
 print(dataset.head())
 print(dataset.tail())
