@@ -9,6 +9,13 @@
 
 from dataclasses import dataclass
 
+from core.config.constants import (
+    FREE_COOLING_THRESHOLD_C,
+    HYBRID_THRESHOLD_C,
+    FAN_POWER_RATIO_FREE,
+    FAN_POWER_RATIO_CHILLER,
+)
+
 
 @dataclass
 class FreeCoolingResult:
@@ -20,14 +27,6 @@ class FreeCoolingResult:
     effective_cooling_kw: float  # 실제 냉각 가능 열량 (kW)
     mode_description: str        # 냉각 모드 설명
 
-
-# 자연공조 전환 온도 기준 (명세서 기준: T_outdoor < 15°C)
-FREE_COOLING_FULL_THRESHOLD_C = 15.0   # 이하: 완전 자연공조
-FREE_COOLING_PARTIAL_THRESHOLD_C = 22.0  # 이하: 부분 자연공조
-
-# 팬 전력 비율 (냉각 부하 대비, ASHRAE TC 9.9 참조)
-FAN_POWER_RATIO_FREE = 0.035   # 자연공조 시 팬 전력 (3.5%)
-FAN_POWER_RATIO_CHILLER = 0.08  # 기계식 냉방 시 팬 전력 (8%)
 
 
 def calculate_free_cooling_efficiency(
@@ -57,12 +56,12 @@ def calculate_free_cooling_efficiency(
         자연공조 효율 (0.0 ~ 1.0)
     """
     # 기본 온도 기반 효율
-    if outdoor_temp_c < FREE_COOLING_FULL_THRESHOLD_C:
+    if outdoor_temp_c < FREE_COOLING_THRESHOLD_C:
         temp_efficiency = 1.0
-    elif outdoor_temp_c < FREE_COOLING_PARTIAL_THRESHOLD_C:
+    elif outdoor_temp_c < HYBRID_THRESHOLD_C:
         # 15°C ~ 22°C 구간: 선형 감소
-        temp_efficiency = 1.0 - (outdoor_temp_c - FREE_COOLING_FULL_THRESHOLD_C) / (
-            FREE_COOLING_PARTIAL_THRESHOLD_C - FREE_COOLING_FULL_THRESHOLD_C
+        temp_efficiency = 1.0 - (outdoor_temp_c - FREE_COOLING_THRESHOLD_C) / (
+            HYBRID_THRESHOLD_C - FREE_COOLING_THRESHOLD_C
         )
     else:
         temp_efficiency = 0.0

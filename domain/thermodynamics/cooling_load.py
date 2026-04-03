@@ -10,14 +10,15 @@
 """
 
 
+from core.config.constants import (
+    T_SUPPLY_DESIGN_C,
+    T_RETURN_DESIGN_C,
+    M_AIR_DESIGN_KG_S,
+    NUM_SERVERS_DESIGN,
+)
+
 # 공기의 물리 상수
 AIR_SPECIFIC_HEAT_KJ_PER_KG_K = 1.005  # 공기 정압 비열 (kJ/kg·K)
-
-# 명세서 기준 설계 파라미터 (SyntheticIDCBuilder 예시, p.15-16)
-M_AIR_DESIGN_KG_S = 50.0   # 설계 공기 유량 (kg/s) — 서버 500대 기준
-NUM_SERVERS_DESIGN = 500    # 설계 기준 서버 수
-T_SUPPLY_DESIGN_C  = 18.0  # CRAH 공급 온도 설계값 (°C)
-T_RETURN_DESIGN_C  = 27.0  # 환기 온도 설계값 (°C)
 
 
 def calculate_m_air_for_servers(num_servers: int) -> float:
