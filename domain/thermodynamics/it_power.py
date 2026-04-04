@@ -8,6 +8,13 @@ IT 장비 전력 소비 모델 (SPECpower_ssj2008 기반)
 from dataclasses import dataclass
 from enum import Enum
 
+from core.config.constants import (
+    CPU_SERVER_P_IDLE_W,
+    CPU_SERVER_P_MAX_W,
+    GPU_SERVER_P_IDLE_W,
+    GPU_SERVER_P_MAX_W,
+)
+
 
 class ServerType(str, Enum):
     CPU = "cpu"
@@ -24,8 +31,8 @@ class ServerSpec:
 
 
 # SPECpower_ssj2008 기준 참조값
-CPU_SERVER = ServerSpec(p_idle_w=200.0, p_max_w=500.0)   # Intel Xeon 기준
-GPU_SERVER = ServerSpec(p_idle_w=300.0, p_max_w=1500.0)  # NVIDIA A100 × 4 기준
+CPU_SERVER = ServerSpec(p_idle_w=CPU_SERVER_P_IDLE_W, p_max_w=CPU_SERVER_P_MAX_W)
+GPU_SERVER = ServerSpec(p_idle_w=GPU_SERVER_P_IDLE_W, p_max_w=GPU_SERVER_P_MAX_W)
 
 
 def calculate_server_power_w(
