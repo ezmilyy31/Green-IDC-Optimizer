@@ -22,23 +22,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from core.schemas.forecast import (
-    CoolingMode,
-    ForecastPoint,
-    ForecastRequest,
-    ForecastResponse,
-    ModelType,
-    PredictionTarget,
-)
-
-from domain.thermodynamics.free_cooling import (
-    FREE_COOLING_FULL_THRESHOLD_C,
-    FREE_COOLING_PARTIAL_THRESHOLD_C,
-)
-
+from core.config.enums import CoolingMode, ModelType, PredictionTarget
+from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
+from core.schemas.forecast import ForecastPoint, ForecastRequest, ForecastResponse
 STEP_MINUTES = 5
-FREE_COOLING_TEMP_C = 15.0 # TODO: 값 통일 필요
-HYBRID_TEMP_C = 22.0 # TODO: 값 통일 필요
 
 # 내부 학습 타깃 컬럼명
 IT_TARGET_COL = "it_power_kw"
@@ -172,7 +159,9 @@ def _forecast_one_target(
     auxiliary_it_map: dict[pd.Timestamp, float] | None,
 ) -> pd.DataFrame:
     """
-    단일 target forecast 실행.
+    단일 target forecast 실행
+    (IT_load / cooling_demand 중 하나에 대해 예측 수행)
+
     반환 컬럼:
     - timestamp
     - prediction
@@ -217,7 +206,7 @@ def _forecast_one_target(
 
     return result[keep_cols].reset_index(drop=True)
 
-
+# model 객체가 가진 attribute에 따라 적절한 예측 방식 선택
 def _run_model_forecast(
     model: Any,
     history_df: pd.DataFrame,
@@ -287,13 +276,14 @@ def _manual_recursive_predict(
 ) -> pd.DataFrame:
     """
     forecast_recursive가 없는 모델을 위한 fallback.
+    1스텝 예측 후, 그 결과를 simulated_history에 넣고, 또 다음 스텝을 예측하는 방식
     """
     simulated_history = history_df.copy()
     rows: list[dict[str, Any]] = []
 
     for step in range(1, horizon_steps + 1):
         next_features = make_next_feature_row(simulated_history, step)
-        pred_arr = model.predict(next_features)
+        pred_arr = model.predict(next_features) # 추론 실행
         pred = float(np.asarray(pred_arr).reshape(-1)[0])
 
         row = {
@@ -323,7 +313,7 @@ def _build_next_feature_row(
     auxiliary_it_map: dict[pd.Timestamp, float] | None,
 ) -> pd.DataFrame:
     """
-    다음 시점 1개 row의 feature 생성.
+    다음 시점 1개 row의 feature 생성. 파생변수까지 도출.
     LGBM처럼 tabular feature를 요구하는 모델을 위해 lag / rolling / interaction 생성.
     """
     feature_columns = list(getattr(model, "feature_columns", []) or [])
@@ -405,7 +395,7 @@ def _build_next_feature_row(
             continue
 
         if feature == "temp_below_15c":
-            row[feature] = max(FREE_COOLING_TEMP_C - float(row["outdoor_temp_c"]), 0.0)
+            row[feature] = max(FREE_COOLING_THRESHOLD_C - float(row["outdoor_temp_c"]), 0.0)
             continue
 
         if feature == "it_power_x_outdoor_temp":
@@ -511,6 +501,10 @@ def _select_model(
     target_name: str,
     model_type: ModelType,
 ) -> Any | None:
+    """
+    전달받은 model_bundle에서 target_name(IT_load / cooling demand)와
+    model_type(lgbm, lstm)에 맞는 학습된 모델 객체를 찾아 반환
+    """
     return (
         model_bundle.get("models", {})
         .get(target_name, {})
@@ -568,6 +562,7 @@ def _load_recent_history_window(
 ) -> pd.DataFrame:
     """
     현재 시점 이전의 최근 lookback_steps rows를 parquet에서 읽어온다.
+    (예측의 출발점이 될 최근 데이터 로드)
 
     주의:
     - 1차 버전은 요청마다 parquet를 읽는다.
@@ -739,11 +734,14 @@ def _last_or_default(history_df: pd.DataFrame, col: str, default: Any) -> Any:
 
 
 # =========================================================
-# Cooling mode 
+# Cooling mode - Post-processing
 # TODO: 나중에 domain/thermodynamics/freecooling.py에서 이 내용을 선언하는게 나을듯?
 # =========================================================
 
 def _rule_based_cooling_mode(outdoor_temp_c: Any) -> CoolingMode:
+    """
+    예측된 외기 온도를 기반으로 데이터 센터의 냉각 모드를 결정
+    """
     if outdoor_temp_c is None or pd.isna(outdoor_temp_c):
         return CoolingMode.CHILLER
 
@@ -751,6 +749,6 @@ def _rule_based_cooling_mode(outdoor_temp_c: Any) -> CoolingMode:
 
     if outdoor_temp_c <= FREE_COOLING_TEMP_C:
         return CoolingMode.FREE_COOLING
-    if outdoor_temp_c <= HYBRID_TEMP_C:
+    if outdoor_temp_c <= HYBRID_THRESHOLD_C:
         return CoolingMode.HYBRID
     return CoolingMode.CHILLER
