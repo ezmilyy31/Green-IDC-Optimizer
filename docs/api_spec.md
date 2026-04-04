@@ -46,8 +46,9 @@ Browser (8501)
 - 대시보드는 API Gateway를 경유하여 내부 서비스에 접근
 - 각 서비스는 독립적으로 실행 가능
 
-> ⚠️ **현재 위반 사항**: `apps/dashboard/app.py`가 `domain.thermodynamics.*`를 직접 import하여 시뮬레이션을 수행 중.
+> ⚠️ **현재 위반 사항**: `apps/dashboard/simulation.py`가 `domain.thermodynamics.*`를 직접 import하여 시뮬레이션을 수행 중.
 > Simulation Service REST API 구현 완료 후 `POST /simulate/24h` 호출로 교체 필요.
+> 관련 코드: `apps/dashboard/simulation.py` — `run_simulation()` 함수, `apps/dashboard/api_client.py` — `simulate_24h()` (미활성화)
 
 ---
 
