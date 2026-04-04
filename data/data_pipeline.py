@@ -1,10 +1,14 @@
 """
 가상 데이터센터 환경 데이터 생성 파이프라인
 """
+#실행: (Green-IDC-Optimizer) ~/Cap1/Green-IDC-Optimizer$ python3 -m data.data_pipeline
+
 import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from core.config.enums import CoolingMode
+from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 from domain.thermodynamics.cooling_load import(
     calculate_cooling_load_from_it_power_kw,
     calculate_cooling_load_from_airflow_kw,
@@ -43,11 +47,11 @@ class Cluster:
         self.dff = pd.DataFrame()
 
     def read_file(self):
-        df = pd.read_parquet('raw/cluster_trace_5min.parquet')
+        df = pd.read_parquet('data/raw/cluster_trace_5min.parquet')
         print('Sorting by time...')
 
         df_sorted = df.sort_values('timestamp', ascending=True)
-        #df_sorted.to_csv('raw/borg_traces_data.csv', index=False)
+        #df_sorted.to_csv('data/raw/borg_traces_data.csv', index=False)
         print('Done. Shape:', df_sorted.shape)
         print('First 3 timestamps:', df_sorted['timestamp'].head(20).tolist())
         print('Last 3 timestamps:', df_sorted['timestamp'].tail(21).tolist())
@@ -87,17 +91,17 @@ class Cluster:
     
     def extract_file(self):
         df_final = self.dff.copy()
-        df_final.to_parquet("processed/cluster_trace_5min.parquet", index=False)
-        print("저장 완료! →  processed/cluster_trace_5min.parquet")
-        df_final.to_csv("processed/cluster_trace_5min.csv", index=False)
-        print("저장 완료! →  processed/cluster_trace_5min.csv")
+        df_final.to_parquet("data/processed/cluster_trace_5min.parquet", index=False)
+        print("저장 완료! →  data/processed/cluster_trace_5min.parquet")
+        df_final.to_csv("data/processed/cluster_trace_5min.csv", index=False)
+        print("저장 완료! →  data/processed/cluster_trace_5min.csv")
 
         print(df_final.head())
         print(df_final.tail())
         print(df_final.dtypes)
 
         # 잘 저장됐는지 확인
-        df_check = pd.read_parquet("processed/cluster_trace_5min.parquet")
+        df_check = pd.read_parquet("data/processed/cluster_trace_5min.parquet")
         print(f"불러오기 확인: {df_check.shape}")
         return df_final
     
@@ -213,17 +217,17 @@ class Weather:
         df_final = pd.concat(self.fin_list, ignore_index=True)
         df_final = self.resample_5min(df_final)
 
-        df_final.to_parquet("processed/weather.parquet", index=False)
-        print("저장 완료! →  processed/weather.parquet")
-        df_final.to_csv("processed/weather.csv", index=False)
-        print("저장 완료! →  processed/weather.csv")
+        df_final.to_parquet("data/processed/weather.parquet", index=False)
+        print("저장 완료! →  data/processed/weather.parquet")
+        df_final.to_csv("data/processed/weather.csv", index=False)
+        print("저장 완료! →  data/processed/weather.csv")
 
         print(df_final.head())
         print(df_final.tail())
         print(df_final.dtypes)
 
         # 잘 저장됐는지 확인
-        df_check = pd.read_parquet("processed/weather.parquet")
+        df_check = pd.read_parquet("data/processed/weather.parquet")
         print(f"불러오기 확인: {df_check.shape}")
         return df_final
 
@@ -247,6 +251,7 @@ class Weather:
             self.fin_list.append(self.process_outlier(self.pre_list3[i]))
         return self.out_file()
 
+#############
 
 class SyntheticIDCBuilder:
     def __init__(self, num_servers=500, days=366):
@@ -280,7 +285,7 @@ class SyntheticIDCBuilder:
         return self.weather.generate_dataset()
     
     def load_spec_data(self):
-        df = pd.read_parquet("raw/specpower.parquet")
+        df = pd.read_parquet("data/raw/specpower.parquet")
         df.head()
 
         # 서버 카테고리 (mid만 남김)
@@ -298,28 +303,49 @@ class SyntheticIDCBuilder:
         print(df.count())
 
         # 내보내기
-        df.to_parquet("processed/spec.parquet", index=False)
-        df.to_csv("processed/spec.csv", index=False)
+        df.to_parquet("data/processed/spec.parquet", index=False)
+        df.to_csv("data/processed/spec.csv", index=False)
         return df
     
     def calculate_it_power(self, P_idle, P_max, cpu_utilization):
         """SPECpower 공식 기반 IT 전력 계산"""
         return self.num_servers * (P_idle + (P_max - P_idle) * cpu_utilization)
     
-    def calculate_cooling_load(self, it_power, supply_temp, return_temp):
-        """열역학 기반 냉각 부하 계산"""
-        m_air = 50  # kg/s (공기 유량)
-        c_p = 1.005  # kJ/kg·K (공기 비열)
-        #import extern
-        return m_air * c_p * (return_temp - supply_temp)
+
+    #(New) Calculate m_air from # of servers (domain/cooling_load.py)
+    def calculate_m_air(self):
+        return calculate_m_air_for_servers(self.num_servers)
+
+    #(New) Calculate Cooling Load from IT Power (domain/cooling_load.py)
+    def calculate_cooling_load_it(self, it_power):
+        """IT 전력 -> 냉각 부하 계산"""
+        return calculate_cooling_load_from_it_power_kw(it_power)
     
+    #(New) Calculate Cooling Load from air flow (domain/cooling_load.py)
+    def calculate_cooling_load_air(self, supply_temp, return_temp):
+        """"공기유량 + 온도차이 -> 냉각 부하"""
+        m_air = self.calculate_m_air()# kg/s (공기 유량)
+        return calculate_cooling_load_from_airflow_kw(m_air, supply_temp, return_temp)
+    
+    #(New) Calculate Chiller Power info (domain/chiller.py)
+    #cooling_load_from_it
     def calculate_chiller_power(self, cooling_load, outside_temp):
         """COP 기반 칠러 전력 계산"""
-        # COP = 6.0 - 0.1 * (outside_temp - 15)
-        cop = max(2.0, 6.0 - 0.1 * (outside_temp - 15))
-        #import extern
-        return cooling_load / cop
+        return calculate_chiller_power_kw(cooling_load, outside_temp)
+        #COP(float), Chiller Power kw(Float), Cooling Mode(Enum)
     
+    #(New) Calculate Free Cooling info (domain/free_cooling.py)
+    #cooling_load_from_air
+    def calculate_fc(self, cooling_load, outside_temp, outside_humidity):
+        return calculate_free_cooling(cooling_load, outside_temp, outside_humidity)
+        #is_available(Bool), efficiency(Float), fan_power_kw(Float), effective_cooling_kw(Float)
+
+    #(New) Calculate PUE info (domain/pue.py)
+    #cooling_load_from_it
+    def calculate_pue_for_data(self, it_power_kw, cooling_load):
+        return calculate_pue(it_power_kw, cooling_load)
+        #PUE(Float), total_power_kw(Float), efficiency_vs_benchmark(Float)
+
     def generate_dataset(self):
         """통합 데이터셋 생성"""
         timestamps = pd.date_range(
@@ -329,8 +355,8 @@ class SyntheticIDCBuilder:
         )
 
         spec_data = self.load_spec_data()
-        P_idle = spec_data["p_idle_w"].mean() # spec 데이터의 평균으로 계산
-        P_max = spec_data["p_max_w"].mean() # spec 데이터의 평균으로 계산
+        P_idle = 200.0 #CPU Server Standard
+        P_max = 500.0 #CPU Server Standard
         
         cpu_util = self.load_workload_pattern() #Google Cluster 시간대별 사용량
         weather_data = self.load_weather_data(2024, 101) #2024년 춘천 (5분 단위로 보간됨)
@@ -344,24 +370,55 @@ class SyntheticIDCBuilder:
         }
         
         df = pd.DataFrame(data)
-        
-        # 파생 변수 계산
-        df['it_power_kw'] = df['cpu_utilization'].apply(lambda cpu: self.calculate_it_power(P_idle, P_max, cpu)) / 1000
-        df['cooling_load_kw'] = df.apply(
-            lambda x: self.calculate_cooling_load(x['it_power_kw'], 18, 27), axis=1
-        )
-        df['chiller_power_kw'] = df.apply(
-            lambda x: self.calculate_chiller_power(x['cooling_load_kw'], x['outside_temp_c']), axis=1
-        )
-        df['pue'] = (df['it_power_kw'] + df['chiller_power_kw']) / df['it_power_kw']
-        df['free_cooling'] = (
-            (df['outside_temp_c'] >= 15).astype(int) + (df['outside_temp_c'] > 22).astype(int) # 0: Free Cooling, 1: Hybrid, 2: Chiller
+
+        # 1. IT 전력 (kW)
+        df['it_power_kw'] = df['cpu_utilization'].apply(
+            lambda cpu: self.calculate_it_power(P_idle, P_max, cpu)
+        ) / 1000
+
+        # 2. 냉각 부하 — IT 전력 기반
+        df['cooling_load_it_kw'] = df['it_power_kw'].apply(
+            self.calculate_cooling_load_it
         )
 
-        # 냉방도일 (Cooling Degree Days) — 기준온도 18°C
-        #BASE_TEMP = 18
-        #daily_avg_temp = df.groupby(df['timestamp'].dt.date)['outside_temp'].transform('mean')
-        #df['cooling_degree_days'] = (daily_avg_temp - BASE_TEMP).clip(lower=0)
+        # 3. 냉각 부하 — 공기 유량 기반 (supply 18°C, return 27°C)
+        df['cooling_load_air_kw'] = df['it_power_kw'].apply(
+            lambda _: self.calculate_cooling_load_air(18.0, 27.0)
+        )
+
+        # 4. 칠러: chiller_power_kw + cooling_mode
+        def calc_chiller(row):
+            result = self.calculate_chiller_power(row['cooling_load_it_kw'], row['outside_temp_c'])
+            return pd.Series({
+                'chiller_power_kw': result.chiller_power_kw,
+                'cooling_mode': result.cooling_mode,
+            })
+
+        df[['chiller_power_kw', 'cooling_mode']] = df.apply(calc_chiller, axis=1)
+
+        # 5. 자연공조: free_cooling_available + free_cooling_efficiency + fan_power_kw + effective_cooling_kw
+        def calc_fc(row):
+            result = self.calculate_fc(
+                row['cooling_load_air_kw'], row['outside_temp_c'], row['outside_humidity_pct']
+            )
+            return pd.Series({
+                'free_cooling_available': result.is_available,
+                'free_cooling_efficiency': result.efficiency,
+                'fan_power_kw': result.fan_power_kw,
+                'effective_cooling_kw': result.effective_cooling_kw,
+            })
+
+        df[['free_cooling_available', 'free_cooling_efficiency', 'fan_power_kw', 'effective_cooling_kw']] = df.apply(calc_fc, axis=1)
+
+        # 6. PUE: pue + total_power_kw
+        def calc_pue(row):
+            result = self.calculate_pue_for_data(row['it_power_kw'], row['chiller_power_kw'])
+            return pd.Series({
+                'pue': result.pue,
+                'total_power_kw': result.total_power_kw,
+            })
+
+        df[['pue', 'total_power_kw']] = df.apply(calc_pue, axis=1)
 
         return df
 
@@ -371,4 +428,4 @@ dataset = builder.generate_dataset()
 print(dataset.head())
 print(dataset.tail())
 print(dataset.dtypes)
-dataset.to_parquet('processed/synthetic_idc_90days.parquet')
+dataset.to_parquet('data/processed/synthetic_idc_1year.parquet')
