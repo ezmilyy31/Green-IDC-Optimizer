@@ -1,15 +1,18 @@
 ## 개발환경 구성
 
 1. **저장소 클론 및 폴더 이동**
+
    ```bash
    git clone <레포지토리_URL>
    cd AI-Green-IDC
    ```
 
 2. **환경변수 파일 생성 및 설정**
+
    ```bash
    cp .env.example .env
    ```
+
    > `.env` 파일을 열어 `KMA_API_KEY` 등 각자의 로컬 환경에 맞는 값을 기입합니다.
 
 3. **가상환경 생성 및 패키지 설치 (`uv` 사용)**
@@ -19,10 +22,10 @@
    uv sync
    ```
 
-
 ## docker 실행
 
 ### simulation-service 실행 (sinergym)
+
 ```
 docker compose up --build simulation-service
 ```
@@ -33,7 +36,7 @@ docker compose up --build simulation-service
 
 ```
 // 전체 실행
-docker compose up --build 
+docker compose up --build
 
 // 백그라운드 실행
 docker compose up -d --build
@@ -52,26 +55,31 @@ docker compose logs -f dashboard
 ## 로컬환경에서 서비스 실행
 
 API Gateway
+
 ```
 uv run uvicorn apps.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Forecast Service
+
 ```
 uv run --extra forecast uvicorn apps.forecast_service.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 Control Service
+
 ```
 uv run --extra control uvicorn apps.control_service.main:app --reload --host 0.0.0.0 --port 8002
 ```
 
 Simulation Service
+
 ```
 uv run uvicorn apps.simulation_service.main:app --reload --host 0.0.0.0 --port 8003
 ```
 
 Dashboard
+
 ```
 uv run --extra dashboard streamlit run apps/dashboard/app.py --server.port 8
 ```
@@ -84,7 +92,6 @@ domain = 핵심 문제 해결 로직
 data = 입출력 자산
 docs = 설명서
 tests = 검증 코드
-
 
 ```
 AI-Green-IDC/                           # 프로젝트 루트 디렉토리. 전체 소스, 데이터, 문서, 실행 설정을 포함하는 최상위 폴더

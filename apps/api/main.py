@@ -47,3 +47,10 @@ async def control_rule_based(request: Request) -> JSONResponse:
 @app.post("/control/rl")
 async def control_rl(request: Request) -> JSONResponse:
     return await _proxy_post(f"{_CONTROL_URL}/control/rl", request)
+
+
+# ── Forecast Service ──────────────────────────────────────────────────────────
+
+@app.post("/api/v1/forecast")
+async def forecast(request: Request) -> JSONResponse:
+    return await _proxy_post(f"{_FORECAST_URL}/api/v1/forecast", request)
