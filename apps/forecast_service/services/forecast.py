@@ -293,6 +293,10 @@ def _manual_recursive_predict(
             "timestamp": next_features.iloc[0]["timestamp"],
             f"predicted_{target_col}": pred,
         }
+
+        if "outdoor_temp_c" in next_features.columns:
+            row["outdoor_temp_c"] = next_features.iloc[0]["outdoor_temp_c"]
+
         rows.append(row)
 
         appended_row = next_features.copy()

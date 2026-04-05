@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 import lightgbm as lgb
+from lightgbm import early_stopping, log_evaluation
 
 """
 LightGBM 기반 시계열 예측 모델 로직.
@@ -143,17 +144,27 @@ class LGBMForecaster:
                 self.feature_columns = list(X_train.columns)
 
         fit_kwargs: dict[str, Any] = {}
+        callbacks = []
 
         if valid_df is not None: # 검증
             self._validate_train_df(valid_df)
             fit_kwargs["eval_set"] = [
                 (valid_df[self.feature_columns], valid_df[self.target_name])
             ]
+            # 검증 셋이 있으면 50번 동안 성능 향상이 없을 때 조기 종료
+            callbacks.append(early_stopping(stopping_rounds=50))
+            callbacks.append(log_evaluation(period=100)) # 100번마다 로그 출력
+
         elif eval_set is not None:
             fit_kwargs["eval_set"] = eval_set
+            callbacks.append(early_stopping(stopping_rounds=50))
+            callbacks.append(log_evaluation(period=100))
 
         if categorical_features is not None:
             fit_kwargs["categorical_feature"] = list(categorical_features)
+        
+        if callbacks:
+            fit_kwargs["callbacks"] = callbacks 
 
         self.model.fit(X_train[self.feature_columns], y_train, **fit_kwargs)
         self.is_fitted = True   # 학습 완료 표시
@@ -270,6 +281,9 @@ class LGBMForecaster:
             if timestamp_col is not None and timestamp_col in next_features.columns:
                 row[timestamp_col] = next_features.iloc[0][timestamp_col]
 
+            if "outdoor_temp_c" in next_features.columns:
+                row["outdoor_temp_c"] = next_features.iloc[0]["outdoor_temp_c"]
+
             rows.append(row)
 
             appended_row = next_features.copy()
@@ -282,8 +296,12 @@ class LGBMForecaster:
         if timestamp_col is not None:
             columns.append(timestamp_col)
         columns.append(f"predicted_{self.target_name}")
+        
+        if "outdoor_temp_c" in pd.DataFrame(rows).columns:
+            columns.append("outdoor_temp_c")
 
         return pd.DataFrame(rows)[columns]
+    
 
     def get_feature_importance(
         self,
