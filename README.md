@@ -32,6 +32,76 @@ docker compose up --build simulation-service
 
 테스트를 위해 `docker-compose.yml`에서 `app/simulation_service/test_sinergym.py`를 실행하도록 설정해 둠.
 
+### forecast-service 실행
+
+1. LGBM 모델 생성
+   
+   아래 명령어 실행 시, `data/models/`에 joblib 파일이 생성됩니다.
+
+   ```
+   uv run python -m domain.forecasting.train.train_lgbm_it_load
+   ```
+
+2. 서비스 실행
+
+   ```
+   docker compose up --build forecast-service
+   ```
+
+3. request 보내기
+   
+   Thunder Client나 Postman을 이용해 보내도 됨
+
+   <details>
+   <summary>예시 Request</summary>
+
+   ```
+   # 1. health check request
+   curl http://localhost:8001/health
+
+   ## response 예시
+   {
+      "status": "ok",
+      "service": "forecast-service",
+      "model_ready": true,
+      "model_load_error": null
+   }
+   ```
+
+   ```
+   2. LGBM IT_load request
+   curl -X POST http://localhost:8001/api/v1/forecast \
+      -H "Content-Type: application/json" \
+      -d '{
+         "prediction_target": "it_load",
+         "model_type": "lgbm",
+         "forecast_horizon_hours": 24,
+         "include_prediction_interval": true
+      }'
+
+   ## response 예시
+   {
+      "prediction_target": "it_load",
+      "model_type_used": "lgbm",
+      "generated_at": "2026-03-31T12:00:00Z",
+      "horizon_hours": 24,
+      "predictions": [
+         {
+            "timestamp": "2024-03-30T00:05:00",
+            "predicted_it_load_kw": 123.4,
+            "predicted_cooling_load_kw": null,
+            "cooling_mode": null,
+            "lower_bound_it_load_kw": 111.1,
+            "upper_bound_it_load_kw": 135.7,
+            "lower_bound_cooling_load_kw": null,
+            "upper_bound_cooling_load_kw": null
+         }
+      ]
+   }
+   이 꼴의 predictions가 288개 반환될꺼(24시간*12개/시간)
+   ```
+   </details>
+
 ### 그 외 실행
 
 ```
