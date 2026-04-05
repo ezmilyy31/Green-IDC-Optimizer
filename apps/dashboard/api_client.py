@@ -134,6 +134,27 @@ def rl_control(
     )
 
 
+# ── Forecast Service endpoints ────────────────────────────────────────────────
+
+def call_forecast(
+    horizon_hours: int = 24,
+    include_prediction_interval: bool = True,
+) -> dict:
+    """POST /api/v1/forecast — API Gateway 경유 IT 부하/냉각 수요 예측.
+
+    응답 predictions 리스트의 각 항목:
+        timestamp, predicted_it_load_kw, predicted_cooling_load_kw,
+        cooling_mode, lower/upper_bound_it_load_kw, lower/upper_bound_cooling_load_kw
+    """
+    return _post(
+        f"{API_URL}/api/v1/forecast",
+        {
+            "forecast_horizon_hours": horizon_hours,
+            "include_prediction_interval": include_prediction_interval,
+        },
+    )
+
+
 # ── Simulation endpoints (서비스 구현 후 활성화) ──────────────────────────────
 # TODO(Simulation Service): 아래 두 함수는 Simulation Service FastAPI 서버 구현 후 활성화.
 #   현재 docker-compose.yml의 simulation-service command가 test_sinergym.py(일회성 스크립트)로

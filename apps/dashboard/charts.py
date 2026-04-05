@@ -32,11 +32,12 @@ def build_pue_gauge(avg_pue: float, title: str = "PUE (24h 평균)") -> go.Figur
     fig = go.Figure(go.Indicator(
         mode="gauge+number+delta",
         value=avg_pue,
-        title={"text": title, "font": {"size": 14}},
+        title={"text": title, "font": {"size": 13}},
         delta={"reference": NAVER_PUE_BENCHMARK, "valueformat": ".3f"},
         number={"valueformat": ".3f"},
+        domain={"x": [0, 1], "y": [0, 0.85]},
         gauge={
-            "axis":      {"range": [1.0, 2.5], "tickformat": ".1f"},
+            "axis":      {"range": [1.0, 2.5], "tickformat": ".1f", "ticklen": 12},
             "bar":       {"color": color},
             "steps":     PUE_GAUGE_STEPS,
             "threshold": {
@@ -46,7 +47,7 @@ def build_pue_gauge(avg_pue: float, title: str = "PUE (24h 평균)") -> go.Figur
             },
         },
     ))
-    fig.update_layout(height=300, margin=dict(t=50, b=20, l=20, r=20))
+    fig.update_layout(height=300, margin=dict(t=20, b=20, l=20, r=20))
     return fig
 
 

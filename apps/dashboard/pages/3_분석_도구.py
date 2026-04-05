@@ -14,11 +14,18 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
+from apps.dashboard.api_client import call_forecast
 from apps.dashboard.charts import build_power_trend, build_pue_trend
-from apps.dashboard.constants import ANIM_SPEED_OPTIONS, CLR_DANGER, COOLING_MODE_LABELS
+from apps.dashboard.constants import ANIM_SPEED_OPTIONS, CLR_CHILLER, CLR_DANGER, CLR_IT, COOLING_MODE_LABELS
 from apps.dashboard.sidebar import add_alarm, render_sidebar
 
 d = render_sidebar()
+
+
+@st.cache_data(ttl=300)
+def _fetch_forecast() -> dict:
+    return call_forecast(horizon_hours=24, include_prediction_interval=True)
+
 
 st.title(":material/analytics: 분석 도구")
 st.caption("24h 예측 애니메이션 · Multi-Zone 2D Heatmap")
@@ -29,10 +36,13 @@ tab_anim, tab_heatmap = st.tabs(["예측 애니메이션", "Multi-Zone Heatmap"]
 # ── 예측 애니메이션 탭 ────────────────────────────────────────────────────
 
 with tab_anim:
-    st.info(
-        "**목업 데이터**: 현재 열역학 시뮬레이션 결과를 표시 중입니다. "
-        "Forecast Service 구현 후 실제 예측값(`POST /api/v1/forecast`)으로 교체됩니다.",
-    )
+    _fc     = _fetch_forecast()
+    _fc_ok  = "error" not in _fc
+    if not _fc_ok:
+        st.info(
+            "**Forecast Service 오프라인**: 현재 열역학 시뮬레이션 결과를 표시 중입니다. "
+            "서비스 연결 후 실제 예측값(`POST /api/v1/forecast`)이 자동으로 표시됩니다.",
+        )
 
     # 인라인 컨트롤
     ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([3, 1, 1, 1])
@@ -105,6 +115,55 @@ with tab_anim:
                 build_pue_trend(df_shown, df_full=df_full, anim_hour=anim_hour if anim_active else None),
                 width="stretch",
             )
+
+    if _fc_ok:
+        _preds   = _fc.get("predictions", [])
+        _n       = len(_preds)
+        _hours_fc = list(range(_n))
+        if _preds:
+            _it      = [p.get("predicted_it_load_kw")          or 0 for p in _preds]
+            _it_lo   = [p.get("lower_bound_it_load_kw")        or 0 for p in _preds]
+            _it_hi   = [p.get("upper_bound_it_load_kw")        or 0 for p in _preds]
+            _cool    = [p.get("predicted_cooling_load_kw")     or 0 for p in _preds]
+            _cool_lo = [p.get("lower_bound_cooling_load_kw")   or 0 for p in _preds]
+            _cool_hi = [p.get("upper_bound_cooling_load_kw")   or 0 for p in _preds]
+
+            fig_fc = go.Figure()
+            # IT 부하 신뢰구간
+            fig_fc.add_trace(go.Scatter(
+                x=_hours_fc + _hours_fc[::-1], y=_it_hi + _it_lo[::-1],
+                fill="toself", fillcolor="rgba(251,191,36,0.12)",
+                line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
+            ))
+            fig_fc.add_trace(go.Scatter(
+                x=_hours_fc, y=_it,
+                name="IT 부하 예측", line=dict(color=CLR_IT, width=2),
+            ))
+            # 냉각 수요 신뢰구간
+            fig_fc.add_trace(go.Scatter(
+                x=_hours_fc + _hours_fc[::-1], y=_cool_hi + _cool_lo[::-1],
+                fill="toself", fillcolor="rgba(163,171,251,0.12)",
+                line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
+            ))
+            fig_fc.add_trace(go.Scatter(
+                x=_hours_fc, y=_cool,
+                name="냉각 수요 예측", line=dict(color=CLR_CHILLER, width=2),
+            ))
+            if anim_active:
+                fig_fc.add_vline(
+                    x=anim_hour, line_dash="solid", line_color="#E74C3C", line_width=2,
+                    annotation_text=f"{anim_hour:02d}:00", annotation_position="top right",
+                )
+            fig_fc.update_layout(
+                title=f"IT 부하 / 냉각 수요 예측 (kW) — Forecast Service · {_fc.get('model_type_used', '')} · {_n}h",
+                height=300,
+                margin=dict(t=40, b=70, l=10, r=10),
+                xaxis=dict(title="시간 (h)", range=[-0.5, _n - 0.5], dtick=4),
+                yaxis_title="전력 (kW)",
+                legend=dict(orientation="h", y=-0.32),
+            )
+            with st.container(border=True):
+                st.plotly_chart(fig_fc, width="stretch")
 
     if anim_active:
         with st.expander("누적 데이터", expanded=False):
