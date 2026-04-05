@@ -35,10 +35,12 @@ class DataCenterRLEnv(gym.Wrapper):
         self._max_episode_steps = max_episode_steps
         self._step_count = 0
 
-        # filtered obs space 재정의
-        n_obs = len(FILTERED_OBS_KEYS)
+        # filtered obs space 재정의 (변수별 실제 범위)
+        obs_low = np.array([1, 0, -30, 0, 15, 15, 20, 0, 0], dtype=np.float32)
+        obs_high = np.array([12, 23, 50, 100, 40, 40, 30, 1, 5e5], dtype=np.float32)
+        # 순서: month, hour, outdoor_temp, humidity, east_temp, west_temp, setpoint, cpu_load, hvac_power
         self.observation_space = gym.spaces.Box(
-            low=-5e7, high=5e7, shape=(n_obs,), dtype=np.float32,
+            low=obs_low, high=obs_high, dtype=np.float32,
         )
 
     # 총 37개의 obs를 필요한 9개의 배열로 변경
@@ -62,7 +64,7 @@ class DataCenterRLEnv(gym.Wrapper):
         hvac_power = obs[8]      # HVAC_electricity_demand_rate
 
         zone_temp = max(east_temp, west_temp)
-        temp_penalty = max(0, zone_tep - 27) * 10
+        temp_penalty = max(0, zone_temp - 27) * 10
         custom_reward = -hvac_power / 1e4 - temp_penalty
         
         """
