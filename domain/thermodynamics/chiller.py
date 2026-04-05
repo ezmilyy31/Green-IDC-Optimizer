@@ -11,13 +11,8 @@
 """
 
 from dataclasses import dataclass
-from enum import Enum
-
-
-class CoolingMode(str, Enum):
-    CHILLER = "chiller"           # 기계식 냉방 (칠러 가동)
-    FREE_COOLING = "free_cooling" # 자연공조 (외기로 직접 냉각)
-    HYBRID = "hybrid"             # 혼합 (부분 자연공조 + 칠러 보조)
+from core.config.enums import CoolingMode
+from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 
 
 @dataclass
@@ -27,12 +22,6 @@ class ChillerResult:
     cop: float                  # 성능계수 (무차원)
     chiller_power_kw: float     # 칠러 전력 소비량 (kW)
     cooling_mode: CoolingMode   # 냉각 모드
-
-
-# 냉각 모드 전환 온도 기준 (°C) — 명세서 기준
-FREE_COOLING_THRESHOLD_C = 15.0   # 이하: 완전 자연공조
-HYBRID_THRESHOLD_C = 22.0         # 이하: 혼합 모드
-
 
 def calculate_cop(outdoor_temp_c: float) -> float:
     """
@@ -69,8 +58,8 @@ def calculate_chiller_power_kw(
 
     냉각 모드 결정 (명세서 기준):
       - 외기 < 15°C: Free Cooling (자연공조) — 칠러 미사용
-      - 15°C ≤ 외기 < 22°C: Hybrid (혼합) — 칠러 일부 사용
-      - 외기 ≥ 22°C: Chiller (기계식) — 칠러 전면 가동
+      - 15°C ≤ 외기 ≤ 22°C: Hybrid (혼합) — 칠러 일부 사용
+      - 외기 > 22°C: Chiller (기계식) — 칠러 전면 가동
 
     공식 (기계식 모드):
       P_chiller = Q_cooling / COP
@@ -95,7 +84,7 @@ def calculate_chiller_power_kw(
         # 자연공조: 기계식 칠러 미사용
         chiller_power_kw = 0.0
 
-    elif outdoor_temp_c < HYBRID_THRESHOLD_C:
+    elif outdoor_temp_c <= HYBRID_THRESHOLD_C:
         # 혼합 모드: 외기 온도에 따라 칠러 비중을 선형 보간
         # 15°C에서 0% 칠러, 22°C에서 100% 칠러
         chiller_fraction = (outdoor_temp_c - FREE_COOLING_THRESHOLD_C) / (

@@ -12,16 +12,7 @@ PUE가 낮을수록 에너지 효율이 높다.
 
 from dataclasses import dataclass
 
-
-# 벤치마크 PUE 값 (참고용) — NAVER 각 춘천 1.09가 목표 기준
-PUE_BENCHMARK = {
-    "naver_chuncheon": 1.09,   # NAVER 각 춘천 (세계 최고 수준)
-    "google_global": 1.10,      # Google 글로벌 평균 (2023)
-    "global_average": 1.58,     # 글로벌 평균
-    "korea_private": 2.03,      # 국내 민간 평균
-    "korea_public": 3.13,       # 국내 공공기관 평균
-    "green_dc_standard": 1.66,  # 그린데이터센터 인증 기준
-}
+from core.config.constants import PUE_BENCHMARK
 
 
 @dataclass
