@@ -259,10 +259,14 @@ def _build_next_feature_row(
 # 3. [학습용] 전체 데이터프레임 벡터화 연산 (Offline Feature Engineering)
 # =========================================================
 
-def build_train_features(df: pd.DataFrame) -> pd.DataFrame:
+# =========================================================
+# 3. [학습용] 전체 데이터프레임 벡터화 연산 (Offline Feature Engineering)
+# =========================================================
+
+def build_train_features(df: pd.DataFrame, target_col: str = IT_TARGET_COL) -> pd.DataFrame:
     """
-    build_next_feature_row에 정의된 파생 변수 규칙을
-    학습용 데이터프레임 전체에 일괄 적용(벡터화)합니다.
+    [학습 시점] _build_next_feature_row에 정의된 파생 변수 규칙을
+    학습용 데이터프레임 전체에 일괄 적용(벡터화 연산)하여 속도를 극대화합니다.
     """
     df = df.copy()
     
@@ -270,7 +274,7 @@ def build_train_features(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {"outside_temp_c": "outdoor_temp_c", "outside_humidity_pct": "outdoor_humidity"}
     df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
     
-    # Calendar
+    # 1. Calendar Features
     df['hour'] = df['timestamp'].dt.hour
     df['day_of_week'] = df['timestamp'].dt.dayofweek
     df['hour_sin'] = np.sin(2.0 * np.pi * df['hour'] / 24.0)
@@ -279,22 +283,25 @@ def build_train_features(df: pd.DataFrame) -> pd.DataFrame:
     df['dow_cos'] = np.cos(2.0 * np.pi * df['day_of_week'] / 7.0)
     df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(int)
 
-    # Weather & Threshold
+    # 2. Weather & Threshold Features
     df['temp_above_15c'] = (df['outdoor_temp_c'] - FREE_COOLING_THRESHOLD_C).clip(lower=0.0)
     df['temp_below_15c'] = (FREE_COOLING_THRESHOLD_C - df['outdoor_temp_c']).clip(lower=0.0)
     df['free_cooling_available'] = (df['outdoor_temp_c'] <= FREE_COOLING_THRESHOLD_C).astype(int)
     df['humidity_temp_index'] = df['outdoor_temp_c'] * df['outdoor_humidity']
 
-    # Lag & Diff (build_next_feature_row에서 it_power_diff_1 등을 지원하므로)
+    # 3. IT 부하 관련 변수 (★ 냉방 수요 예측의 핵심 피처)
+    # forecast.py 추론 시 넘겨받는 'predicted_it_power_kw'를 학습 시에는 실제 정답 데이터로 세팅합니다.
+    df['predicted_it_power_kw'] = df[IT_TARGET_COL] 
+    
     df['it_power_kw_lag_1'] = df[IT_TARGET_COL].shift(1)
-    df['it_power_kw_lag_2'] = df[IT_TARGET_COL].shift(2)
-    df['it_power_kw_lag_12'] = df[IT_TARGET_COL].shift(12)
-    df['it_power_diff_1'] = df['it_power_kw_lag_1'] - df['it_power_kw_lag_2']
-    df['it_power_diff_12'] = df['it_power_kw_lag_1'] - df['it_power_kw_lag_12']
-
-    # Interaction (target 누수 방지를 위해 lag_1 사용)
     df['it_power_x_outdoor_temp'] = df['it_power_kw_lag_1'] * df['outdoor_temp_c']
-    df['it_power_x_humidity'] = df['it_power_kw_lag_1'] * df['outdoor_humidity']
     df['free_cooling_x_it_power'] = df['free_cooling_available'] * df['it_power_kw_lag_1']
+
+    # 4. 동적 Target Lag & Diff Features (IT 부하든 냉방 부하든 입력된 타겟에 맞춰 생성)
+    df[f'{target_col}_lag_1'] = df[target_col].shift(1)
+    df[f'{target_col}_lag_2'] = df[target_col].shift(2)
+    df[f'{target_col}_lag_12'] = df[target_col].shift(12)
+    df[f'{target_col}_diff_1'] = df[f'{target_col}_lag_1'] - df[f'{target_col}_lag_2']
+    df[f'{target_col}_diff_12'] = df[f'{target_col}_lag_1'] - df[f'{target_col}_lag_12']
 
     return df.dropna().reset_index(drop=True)
