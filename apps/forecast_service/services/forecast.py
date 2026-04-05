@@ -25,12 +25,19 @@ import pandas as pd
 from core.config.enums import CoolingMode, ModelType, PredictionTarget
 from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 from core.schemas.forecast import ForecastPoint, ForecastRequest, ForecastResponse
+<<<<<<< Updated upstream
+=======
+
+from domain.forecasting.features.builder import _build_next_feature_row
+
+
+>>>>>>> Stashed changes
 STEP_MINUTES = 5
 
 # 내부 학습 타깃 컬럼명
 IT_TARGET_COL = "it_power_kw"
 COOLING_TARGET_COL = "chiller_power_kw"  # 필요시 "cooling_load_kw"로 변경
-
+DATA_PATH = "./data/processed/synthetic_idc_1year.parquet"
 
 # =========================================================
 # Public entrypoint
@@ -549,7 +556,7 @@ def _project_root() -> Path:
 
 
 def _resolve_feature_data_path() -> Path:
-    raw_path = os.getenv("FEATURE_DATA_PATH", "./data/processed/synthetic_idc_90days.parquet")
+    raw_path = os.getenv("FEATURE_DATA_PATH", DATA_PATH)
     path = Path(raw_path)
     if not path.is_absolute():
         path = _project_root() / path
@@ -584,7 +591,7 @@ def _load_recent_history_window(
 
 
 # =========================================================
-# Weather utilities
+# Weather utilities 
 # =========================================================
 def _prepare_weather_df(weather_payload: Any, step_minutes: int) -> pd.DataFrame:
     if not weather_payload:
@@ -626,113 +633,6 @@ def _prepare_weather_df(weather_payload: Any, step_minutes: int) -> pd.DataFrame
     return df
 
 
-def _lookup_weather_row(ts: pd.Timestamp, weather_df: pd.DataFrame) -> dict[str, Any]:
-    if weather_df.empty:
-        return {}
-
-    match = weather_df.loc[weather_df["timestamp"] == ts]
-    if not match.empty:
-        row = match.iloc[0]
-        return {
-            "outdoor_temp_c": float(row["outdoor_temp_c"]),
-            "outdoor_humidity": float(row["outdoor_humidity"]),
-            "outdoor_wind_speed": float(row["outdoor_wind_speed"]),
-        }
-
-    before = weather_df.loc[weather_df["timestamp"] <= ts]
-    row = weather_df.iloc[0] if before.empty else before.iloc[-1]
-
-    return {
-        "outdoor_temp_c": float(row["outdoor_temp_c"]),
-        "outdoor_humidity": float(row["outdoor_humidity"]),
-        "outdoor_wind_speed": float(row["outdoor_wind_speed"]),
-    }
-
-
-# =========================================================
-# Feature engineering helpers
-# =========================================================
-def _build_calendar_features(ts: pd.Timestamp) -> dict[str, Any]:
-    hour = ts.hour
-    minute = ts.minute
-    day_of_week = ts.dayofweek
-
-    return {
-        "hour": hour,
-        "minute": minute,
-        "day_of_week": day_of_week,
-        "day_of_month": ts.day,
-        "month": ts.month,
-        "is_weekend": day_of_week in (5, 6),
-        "hour_sin": math.sin(2.0 * math.pi * hour / 24.0),
-        "hour_cos": math.cos(2.0 * math.pi * hour / 24.0),
-        "dow_sin": math.sin(2.0 * math.pi * day_of_week / 7.0),
-        "dow_cos": math.cos(2.0 * math.pi * day_of_week / 7.0),
-    }
-
-
-def _parse_lag_feature(feature_name: str) -> tuple[str, int] | None:
-    if "_lag_" not in feature_name:
-        return None
-    base_col, lag_str = feature_name.rsplit("_lag_", 1)
-    if not lag_str.isdigit():
-        return None
-    return base_col, int(lag_str)
-
-
-def _parse_rolling_feature(feature_name: str) -> tuple[str, str, int] | None:
-    for suffix, stat_name in (("_roll_mean_", "mean"), ("_roll_std_", "std")):
-        if suffix in feature_name:
-            base_col, window_str = feature_name.rsplit(suffix, 1)
-            if window_str.isdigit():
-                return base_col, stat_name, int(window_str)
-    return None
-
-
-def _lag_value(history_df: pd.DataFrame, base_col: str, lag: int) -> float:
-    if base_col not in history_df.columns or history_df.empty:
-        return 0.0
-
-    series = pd.to_numeric(history_df[base_col], errors="coerce").dropna()
-    if series.empty:
-        return 0.0
-
-    if len(series) < lag:
-        return float(series.iloc[0])
-
-    return float(series.iloc[-lag])
-
-
-def _rolling_value(history_df: pd.DataFrame, base_col: str, stat_name: str, window: int) -> float:
-    if base_col not in history_df.columns or history_df.empty:
-        return 0.0
-
-    series = pd.to_numeric(history_df[base_col], errors="coerce").dropna()
-    if series.empty:
-        return 0.0
-
-    tail = series.tail(window)
-
-    if stat_name == "mean":
-        return float(tail.mean())
-    if stat_name == "std":
-        value = tail.std()
-        return 0.0 if pd.isna(value) else float(value)
-
-    raise ValueError(f"Unsupported rolling stat: {stat_name}")
-
-
-def _last_or_default(history_df: pd.DataFrame, col: str, default: Any) -> Any:
-    if col not in history_df.columns or history_df.empty:
-        return default
-
-    series = history_df[col].dropna()
-    if series.empty:
-        return default
-
-    return series.iloc[-1]
-
-
 # =========================================================
 # Cooling mode - Post-processing
 # TODO: 나중에 domain/thermodynamics/freecooling.py에서 이 내용을 선언하는게 나을듯?
@@ -747,7 +647,7 @@ def _rule_based_cooling_mode(outdoor_temp_c: Any) -> CoolingMode:
 
     outdoor_temp_c = float(outdoor_temp_c)
 
-    if outdoor_temp_c <= FREE_COOLING_TEMP_C:
+    if outdoor_temp_c <= FREE_COOLING_THRESHOLD_C:
         return CoolingMode.FREE_COOLING
     if outdoor_temp_c <= HYBRID_THRESHOLD_C:
         return CoolingMode.HYBRID
