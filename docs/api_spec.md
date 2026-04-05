@@ -207,27 +207,37 @@ IT 부하 및 냉각 수요 예측 서비스입니다.
 { "status": "ok", "service": "forecast-service" }
 ```
 
-### `POST /api/v1/forecast` 🚧 구현 예정
+### `POST /api/v1/forecast` ✅ 구현 완료
 
-> 🚧 엔드포인트 미구현. 아래는 목표 스키마.
+> API Gateway(`POST /api/v1/forecast`) → Forecast Service 프록시
 
-**요청**
+**요청 (ForecastRequest)**
 
-| 필드            | 타입   | 설명                      |
-| --------------- | ------ | ------------------------- |
-| `horizon_hours` | int    | 예측 기간 (24 ~ 168시간)  |
-| `start_time`    | string | 예측 시작 시각 (ISO 8601) |
+| 필드                          | 타입           | 필수 | 설명                                                           |
+| ----------------------------- | -------------- | ---- | -------------------------------------------------------------- |
+| `forecast_horizon_hours`      | int            | ✅   | 예측 기간 (1 ~ 168시간)                                        |
+| `prediction_target`           | string         | —    | `"it_load"` \| `"cooling_demand"` \| `"both"` (기본: `"both"`) |
+| `model_type`                  | string         | —    | `"lgbm"` \| `"lstm"` (기본: `"lgbm"`)                          |
+| `current_timestamp`           | string \| null | —    | 예측 기준 시각 (ISO 8601), null 시 현재 시각                   |
+| `include_prediction_interval` | bool           | —    | 신뢰구간 포함 여부 (기본: `true`)                              |
 
-**응답**
+**응답 (ForecastResponse)**
 
-| 필드                          | 타입   | 설명                  |
-| ----------------------------- | ------ | --------------------- |
-| `forecast`                    | array  | 시간별 예측값 리스트  |
-| `forecast[].timestamp`        | string | 예측 시각             |
-| `forecast[].it_power_kw`      | float  | IT 전력 예측값 (kW)   |
-| `forecast[].cooling_kw`       | float  | 냉각 전력 예측값 (kW) |
-| `forecast[].confidence_lower` | float  | 90% 신뢰구간 하한     |
-| `forecast[].confidence_upper` | float  | 90% 신뢰구간 상한     |
+| 필드                                        | 타입   | 설명                      |
+| ------------------------------------------- | ------ | ------------------------- |
+| `prediction_target`                         | string | 예측 대상                 |
+| `model_type_used`                           | string | 사용된 모델 타입          |
+| `generated_at`                              | string | 예측 생성 시각 (ISO 8601) |
+| `horizon_hours`                             | int    | 예측 기간 (h)             |
+| `predictions`                               | array  | 시간별 예측값 리스트      |
+| `predictions[].timestamp`                   | string | 예측 시각                 |
+| `predictions[].predicted_it_load_kw`        | float  | IT 전력 예측값 (kW)       |
+| `predictions[].predicted_cooling_load_kw`   | float  | 냉각 수요 예측값 (kW)     |
+| `predictions[].cooling_mode`                | string | 예측 냉각 모드            |
+| `predictions[].lower_bound_it_load_kw`      | float  | IT 부하 신뢰구간 하한     |
+| `predictions[].upper_bound_it_load_kw`      | float  | IT 부하 신뢰구간 상한     |
+| `predictions[].lower_bound_cooling_load_kw` | float  | 냉각 수요 신뢰구간 하한   |
+| `predictions[].upper_bound_cooling_load_kw` | float  | 냉각 수요 신뢰구간 상한   |
 
 **성능 목표 (명세서 4절)**
 
@@ -385,7 +395,7 @@ Sinergym(EnergyPlus 기반) 환경을 통한 데이터센터 시뮬레이션 서
 - [ ] **Simulation Service** `POST /simulate/step`, `POST /simulate/24h` 구현
   - `docker-compose.yml` command를 `test_sinergym.py` → FastAPI 서버 실행으로 교체
 - [ ] **Dashboard** `domain.*` 직접 import → `POST /simulate/24h` REST 호출로 교체 (명세서 11절 위반 해소)
-- [ ] **Forecast Service** `POST /api/v1/forecast` 구현 (LSTM / Transformer, MAPE 5% 이내)
+- [x] **Forecast Service** `POST /api/v1/forecast` 구현 완료 — Dashboard 연결 완료 (`3_분석_도구.py`)
 - [ ] **Control Service** `POST /api/v1/control/mpc` 구현 (명세서 선택 A)
   - API Gateway에 프록시 라우트 `/api/v1/control/mpc` 추가 필요
 - [ ] **Control Service** `POST /control/scenario`, `GET /control/status`, `GET /esg/summary` 구현
