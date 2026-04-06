@@ -12,12 +12,13 @@ ODE 기반으로 서버실 온도를 시간에 따라 적분한다.
   - C_eff  : 유효 열용량 (kJ/K) = 공기 + 서버 장비 + 랙 + 구조물
   - Δt     : 시간 스텝 (s)
 
-유효 열용량 구성 (명세서 기준 500대 서버, 중규모 IDC 1홀):
-  - 공기:     1.2 kg/m³ × 1,500 m³ × 1.005 kJ/kg·K ≈ 1,809 kJ/K
-  - 서버 장비: 500대 × 20 kg × 0.5 kJ/kg·K           = 5,000 kJ/K
-  - 랙:       13개 × 100 kg × 0.5 kJ/kg·K            =   650 kJ/K
-  - 구조물:   바닥·벽 (얇게 반영)                     = 2,000 kJ/K
-  합계: 약 9,459 kJ/K  (열적 시정수 τ = 214초, ṁ=44 kg/s 기준)
+유효 열용량 구성 (CPU 400대 + GPU 20대, 중규모 IDC 1홀):
+  - 공기:        1.2 kg/m³ × 1,500 m³ × 1.005 kJ/kg·K ≈ 1,809 kJ/K
+  - CPU 서버:    400대 × 20 kg × 0.5 kJ/kg·K           = 4,000 kJ/K
+  - GPU 서버:     20대 × 60 kg × 0.5 kJ/kg·K           =   600 kJ/K  (A100×4, 약 60kg)
+  - 랙:          12개 × 100 kg × 0.5 kJ/kg·K           =   600 kJ/K  (CPU 10 + GPU 2)
+  - 구조물:      바닥·벽 (얇게 반영)                    = 2,000 kJ/K
+  합계: 약 9,009 kJ/K  (열적 시정수 τ = C_eff / (ṁ·cp) ≈ 272초, ṁ=33 kg/s 기준)
 """
 
 import sys
@@ -32,7 +33,7 @@ from dataclasses import dataclass
 from domain.thermodynamics.cooling_load import AIR_SPECIFIC_HEAT_KJ_PER_KG_K
 
 
-# 서버실 기본 설계 파라미터 (명세서 기준 500대 서버, 중규모 IDC 1홀 500m²×3m)
+# 서버실 기본 설계 파라미터 (CPU 400대 + GPU 20대, 중규모 IDC 1홀 500m²×3m)
 DEFAULT_ROOM_VOLUME_M3 = 1500.0      # 서버실 부피 (m³), 500m² × 천장 3m
 DEFAULT_AIR_DENSITY_KG_M3 = 1.2     # 공기 밀도 (kg/m³), 20°C 1atm 기준
 DEFAULT_T_INITIAL_C = 24.0          # 초기 서버실 온도 (°C) — 정상 운영 평형 온도 가정
@@ -50,11 +51,11 @@ DEFAULT_M_DOT_KG_PER_S = 44.0     # 전체 공기 유량 (kg/s), 4대 전부 가
 DEFAULT_CHILLER_DESIGN_KW = 56.6  # 칠러 1대 전기 용량 (kW)
 
 # 유효 열용량 구성 (kJ/K)
-_C_AIR = DEFAULT_AIR_DENSITY_KG_M3 * DEFAULT_ROOM_VOLUME_M3 * AIR_SPECIFIC_HEAT_KJ_PER_KG_K
-_C_SERVERS = 500 * 20 * 0.5   # 서버 500대 × 20kg × 0.5 kJ/kg·K
-_C_RACKS = 13 * 100 * 0.5     # 랙 13개 × 100kg × 0.5 kJ/kg·K  (500대 / 40대per랙 ≈ 13)
-_C_STRUCTURE = 2000.0          # 바닥·벽 구조물 (1500m³ 기준)
-DEFAULT_C_EFF_KJ_PER_K = _C_AIR + _C_SERVERS + _C_RACKS + _C_STRUCTURE  # ≈ 9,459 kJ/K
+_C_AIR     = DEFAULT_AIR_DENSITY_KG_M3 * DEFAULT_ROOM_VOLUME_M3 * AIR_SPECIFIC_HEAT_KJ_PER_KG_K
+_C_SERVERS = 400 * 20 * 0.5 + 20 * 60 * 0.5  # CPU 400대×20kg + GPU 20대×60kg, 0.5 kJ/kg·K
+_C_RACKS   = 12 * 100 * 0.5                   # 랙 12개×100kg×0.5 kJ/kg·K (CPU 10 + GPU 2)
+_C_STRUCTURE = 2000.0                          # 바닥·벽 구조물 (1500m³ 기준)
+DEFAULT_C_EFF_KJ_PER_K = _C_AIR + _C_SERVERS + _C_RACKS + _C_STRUCTURE  # ≈ 9,009 kJ/K
 
 
 @dataclass
