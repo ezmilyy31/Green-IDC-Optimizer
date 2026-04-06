@@ -17,14 +17,15 @@ Incremental (velocity) PID:
 게인값 (IMC 기반 + sweep 튜닝, 정상 운영 CRAH 3대 기준):
   Kp = 1.0   → 오차 1°C당 공급 온도 1°C/s 조정
   Ki = 0.001 → 정상 상태 오차 제거 (IMC 기준 Ki_imc ≈ 0.0035, sweep 결과 0.001 채택)
-  Kd = 0.0   → S4 칠러 고장 복구 시 과보상 방지 (Kd 클수록 회복 속도 저하 확인)
+  Kd = 0.5   → supply_min=16°C 확장 후 S3 칠러 고장 복구 시 과냉각 방지.
+              회복 구간(delta_error > 0)에서 supply를 살짝 올려 setpoint 근접 수렴
 
   도출 근거:
-  - 시스템 유효 열용량: C_eff = 9,459 kJ/K
-    (공기 1,809 + 서버장비 5,000 + 랙 650 + 구조물 2,000)
+  - 시스템 유효 열용량: C_eff = 9,009 kJ/K
+    (공기 1,809 + CPU서버 4,000 + GPU서버 600 + 랙 600 + 구조물 2,000)
   - 정상 운영 공기 유량: ṁ·cp = 33 kg/s × 1.005 kJ/kg·K = 33.2 kW/K  (CRAH 3대)
-  - 열적 시정수: τ = C_eff / (ṁ·cp) = 9,459 / 33.2 = 285초
-  - IMC 공식: Kp_imc = 1.0, Ki_imc = Kp / τ ≈ 0.0035
+  - 열적 시정수: τ = C_eff / (ṁ·cp) = 9,009 / 33.2 = 272초
+  - IMC 공식: Kp_imc = 1.0, Ki_imc = Kp / τ ≈ 0.0037
 
 고정 setpoint:
   - 서버실 목표 온도 24°C 고정 (zone_target_c 파라미터로 주입)
@@ -37,10 +38,10 @@ Anti-windup: 조건부 적분
 # 검증된 게인값 (incremental PID, IMC 기반 + sweep 튜닝, CRAH 3대 정상 운영 기준)
 DEFAULT_KP = 1.0
 DEFAULT_KI = 0.001
-DEFAULT_KD = 0.0
+DEFAULT_KD = 1.0
 
 # CRAH 공급 온도 물리적 한계 (°C)
-SUPPLY_TEMP_MIN_C = 18.0
+SUPPLY_TEMP_MIN_C = 16.0
 SUPPLY_TEMP_MAX_C = 27.0
 
 

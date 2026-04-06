@@ -37,6 +37,7 @@ from domain.thermodynamics.cooling_load import (
     calculate_cooling_load_from_airflow_kw,
 )
 from domain.thermodynamics.chiller import calculate_chiller_power_kw, calculate_cop
+from domain.thermodynamics.it_power import calculate_total_it_power_kw
 
 
 def _resolve_schedule(value: "list[float] | float", steps: int, name: str) -> list[float]:
@@ -163,25 +164,26 @@ if __name__ == "__main__":
         return [normal_val if t < CRISIS_START else crisis_val for t in range(STEPS)]
 
     # 전환 구간 (예비 장비 투입까지 걸리는 시간)
-    CRAH_TRANSITION_S    = 120   # CRAH 예비 투입까지 대기 시간 (초)
-    CHILLER_TRANSITION_S = 120   # 칠러 예비 투입까지 대기 시간 (초)
+    CHILLER_TRANSITION_S = 160   # 칠러 고장 감지 + 예비 투입까지 대기 시간 (초)
 
-    # Q_in 기준: 500대 × (200W + 300W×0.4) = 160kW (평균, SPECpower 기반)
-    it_s1      = _sched(160.0, 208.0)   # S1: IT 부하 급증 (160 → +30% = 208kW)
-    outdoor_s2 = _sched(22.0,  42.0)    # S2: 폭염
-    it_s2      = [160.0] * STEPS
+    # ── 서버 구성 (SPECpower 기반) ────────────────────────────────────────
+    NUM_CPU   = 400   # CPU 서버 대수
+    NUM_GPU   = 20    # GPU 서버 대수 (A100×4 기준, 전체의 ~5%)
+    BASE_UTIL = 0.4   # 평균 CPU 사용률 (40%)
 
-    # S3: CRAH 1대 고장 — 전환 구간(60s) 동안 3→2대, 예비 투입 후 3대 복구
-    it_s3 = [160.0] * STEPS
-    n_crah_s3 = [
-        DEFAULT_N_CRAH_ACTIVE if t < CRISIS_START else
-        (DEFAULT_N_CRAH_ACTIVE - 1 if t < CRISIS_START + CRAH_TRANSITION_S else DEFAULT_N_CRAH_ACTIVE)
-        for t in range(STEPS)
-    ]
+    # Q_in 기준: calculate_total_it_power_kw(util, num_cpu, num_gpu)
+    # CPU 400대: (200 + 300×0.4) × 400 = 128kW
+    # GPU  20대: (300 + 1200×0.4) × 20 = 15.6kW  → 합계 ≈ 144kW
+    IT_BASE_KW   = calculate_total_it_power_kw(BASE_UTIL, NUM_CPU, NUM_GPU)
+    IT_CRISIS_KW = round(IT_BASE_KW * 1.3, 1)   # S1: +30% 부하 급증
 
-    # S4: 칠러 고장 — 전환 구간(120s) 동안 냉각 불가, 예비 칠러 투입 후 복구
-    it_s4 = [160.0] * STEPS
-    chiller_scale_s4 = [
+    it_s1      = _sched(IT_BASE_KW, IT_CRISIS_KW)
+    outdoor_s2 = _sched(22.0, 42.0)              # S2: 폭염
+    it_s2      = [IT_BASE_KW] * STEPS
+
+    # S3: 칠러 고장 — 전환 구간(160s) 동안 냉각 불가, 예비 칠러 투입 후 복구
+    it_s3 = [IT_BASE_KW] * STEPS
+    chiller_scale_s3 = [
         1.0 if t < CRISIS_START else
         (0.0 if t < CRISIS_START + CHILLER_TRANSITION_S else 1.0)
         for t in range(STEPS)
@@ -203,9 +205,8 @@ if __name__ == "__main__":
     def _run_all(kp, ki, kd):
         r1 = _run(kp, ki, kd, it_s1)
         r2 = _run(kp, ki, kd, it_s2, outdoor_s2)
-        r3 = _run(kp, ki, kd, it_s3, n_crah_sched=n_crah_s3)
-        r4 = _run(kp, ki, kd, it_s4, chiller_scale_sched=chiller_scale_s4)
-        return r1, r2, r3, r4
+        r3 = _run(kp, ki, kd, it_s3, chiller_scale_sched=chiller_scale_s3)
+        return r1, r2, r3
 
     def _crisis_ret(results):
         crisis = results[CRISIS_START:]
@@ -221,9 +222,9 @@ if __name__ == "__main__":
     # ────────────────────────────────────────────────────────────────────
     # [1단계] Ki sweep  (Kp=1.0, Kd=0.0 고정)
     #
-    # 정상 운영 3대 기준: ṁ = 33.3 kg/s, ṁ·cp = 33.47 kW/K
-    # τ = C_eff / (ṁ·cp) = 9459 / 33.47 ≈ 283초
-    # IMC 기준: Ki_imc = Kp / τ = 1.0 / 283 ≈ 0.00354
+    # 정상 운영 3대 기준: ṁ = 33.0 kg/s, ṁ·cp = 33.2 kW/K
+    # τ = C_eff / (ṁ·cp) = 9009 / 33.2 ≈ 272초
+    # IMC 기준: Ki_imc = Kp / τ = 1.0 / 272 ≈ 0.00368
     # ────────────────────────────────────────────────────────────────────
     _M_DOT_NORMAL = DEFAULT_M_DOT_KG_PER_S * DEFAULT_N_CRAH_ACTIVE / 4  # 3대 기준 ṁ
     _TAU = DEFAULT_C_EFF_KJ_PER_K / (_M_DOT_NORMAL * AIR_SPECIFIC_HEAT_KJ_PER_KG_K)
@@ -235,66 +236,64 @@ if __name__ == "__main__":
     print("  [1단계] Ki sweep — Kp=1.0, Kd=0.0 고정")
     print(f"  IMC 기준: Ki_imc = {KP:.1f} / {_TAU:.0f} = {KP/_TAU:.5f}  (τ={_TAU:.0f}s, ṁ={_M_DOT_NORMAL:.1f} kg/s, 3대 정상 운영)")
     print("=" * 74)
-    print(f"{'Ki':>7}  {'정상최종T':>9}  {'SP':>7}  {'S1위기%':>8}  {'S2위기%':>8}  {'S3위기%':>8}  {'S4위기%':>8}  {'min%':>6}")
-    print(f"  (S1: IT+30% / S2: 폭염 42°C / S3: CRAH 전환 120s / S4: 칠러 전환 120s)")
-    print("-" * 82)
+    print(f"{'Ki':>7}  {'정상최종T':>9}  {'SP':>7}  {'S1위기%':>8}  {'S2위기%':>8}  {'S3위기%':>8}  {'min%':>6}")
+    print(f"  (S1: IT+30% / S2: 폭염 42°C / S3: 칠러 전환 {CHILLER_TRANSITION_S}s)")
+    print("-" * 74)
 
     ki_best = KI_SWEEP[-1]
     ki_best_score = -1.0
     ki_sweep_data = {}
 
     for ki in KI_SWEEP:
-        r1, r2, r3, r4 = _run_all(KP, ki, 0.0)
+        r1, r2, r3 = _run_all(KP, ki, 0.0)
         normal_last = r1[CRISIS_START - 1]
         t_final = normal_last.t_zone_c
         s1c = _crisis_ret(r1)
         s2c = _crisis_ret(r2)
         s3c = _crisis_ret(r3)
-        s4c = _crisis_ret(r4)
-        min_c = min(s1c, s2c, s3c, s4c)
-        ki_sweep_data[ki] = (s1c, s2c, s3c, s4c, min_c, t_final)
+        min_c = min(s1c, s2c, s3c)
+        ki_sweep_data[ki] = (s1c, s2c, s3c, min_c, t_final)
 
         mark = " ◎" if min_c >= 95 else (" ○" if min_c >= 80 else "")
-        print(f"{ki:>7.3f}  {t_final:>8.2f}°C  {ZONE_TARGET_C:>6.2f}°C  {s1c:>7.1f}%  {s2c:>7.1f}%  {s3c:>7.1f}%  {s4c:>7.1f}%  {min_c:>5.1f}%{mark}")
+        print(f"{ki:>7.3f}  {t_final:>8.2f}°C  {ZONE_TARGET_C:>6.2f}°C  {s1c:>7.1f}%  {s2c:>7.1f}%  {s3c:>7.1f}%  {min_c:>5.1f}%{mark}")
 
         score = min_c * 1000 - abs(t_final - ZONE_TARGET_C)
         if score > ki_best_score:
             ki_best_score = score
             ki_best = ki
 
-    print(f"\n  → 최적 Ki = {ki_best}  (위기 min={ki_sweep_data[ki_best][4]:.1f}%,"
-          f" 정상 최종T={ki_sweep_data[ki_best][5]:.2f}°C vs SP={ZONE_TARGET_C:.2f}°C)")
+    print(f"\n  → 최적 Ki = {ki_best}  (위기 min={ki_sweep_data[ki_best][3]:.1f}%,"
+          f" 정상 최종T={ki_sweep_data[ki_best][4]:.2f}°C vs SP={ZONE_TARGET_C:.2f}°C)")
 
     # ────────────────────────────────────────────────────────────────────
     # [2단계] Kd sweep  (Kp=2.0, Ki=ki_best 고정)
     # ────────────────────────────────────────────────────────────────────
-    # Kd가 크면 T_zone 회복 구간에서 delta_error가 양수로 바뀌어 supply를 급격히 올려
-    # 잘못된 평형점에 고착될 수 있음. 실용 범위로 제한.
-    KD_SWEEP = [0.0, 1.0, 2.0, 5.0, 10.0, 20.0]
+    # 음수 Kd: 회복 구간(delta_error > 0)에서 supply를 낮춰 냉각 유지 → 수렴 가속 가능
+    # 양수 Kd: 회복 구간에서 supply를 올려 냉각 방해 → supply가 포화(18°C)된 상태에서 역효과
+    KD_SWEEP = [-20.0, -10.0, -5.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0]
 
     print("\n" + "=" * 74)
     print(f"  [2단계] Kd sweep — Kp=1.0, Ki={ki_best} 고정")
     print("=" * 74)
-    print(f"{'Kd':>7}  {'S4회복T':>9}  {'S1위기%':>8}  {'S2위기%':>8}  {'S3위기%':>8}  {'S4위기%':>8}  {'min%':>6}")
-    print("-" * 82)
+    print(f"{'Kd':>7}  {'S3회복T':>9}  {'S1위기%':>8}  {'S2위기%':>8}  {'S3위기%':>8}  {'min%':>6}")
+    print("-" * 66)
 
     kd_best = 0.0
     kd_best_score = -1.0
 
     for kd in KD_SWEEP:
-        r1, r2, r3, r4 = _run_all(KP, ki_best, kd)
-        s4_final_T = r4[-1].t_zone_c  # 칠러 백업 후 최종 T_zone (24°C에 가까울수록 좋음)
+        r1, r2, r3 = _run_all(KP, ki_best, kd)
+        s3_final_T = r3[-1].t_zone_c  # 칠러 백업 후 최종 T_zone (24°C에 가까울수록 좋음)
         s1c = _crisis_ret(r1)
         s2c = _crisis_ret(r2)
         s3c = _crisis_ret(r3)
-        s4c = _crisis_ret(r4)
-        min_c = min(s1c, s2c, s3c, s4c)
+        min_c = min(s1c, s2c, s3c)
 
-        mark = " ◎" if min_c >= ki_sweep_data[ki_best][4] else (
-               " ○" if min_c >= ki_sweep_data[ki_best][4] - 2 else "")
-        print(f"{kd:>7.1f}  {s4_final_T:>8.2f}°C  {s1c:>7.1f}%  {s2c:>7.1f}%  {s3c:>7.1f}%  {s4c:>7.1f}%  {min_c:>5.1f}%{mark}")
+        mark = " ◎" if min_c >= ki_sweep_data[ki_best][3] else (
+               " ○" if min_c >= ki_sweep_data[ki_best][3] - 2 else "")
+        print(f"{kd:>7.1f}  {s3_final_T:>8.2f}°C  {s1c:>7.1f}%  {s2c:>7.1f}%  {s3c:>7.1f}%  {min_c:>5.1f}%{mark}")
 
-        score = min_c * 1000 - abs(s4_final_T - ZONE_TARGET_C)
+        score = min_c * 1000 - abs(s3_final_T - ZONE_TARGET_C)
         if score > kd_best_score:
             kd_best_score = score
             kd_best = kd
@@ -302,7 +301,7 @@ if __name__ == "__main__":
     print(f"\n  → 최적 Kd = {kd_best}")
     print(f"\n  ★ 최종 게인값: Kp={KP}, Ki={ki_best}, Kd={kd_best}")
     print(f"    (이전: Kp=2.0, Ki=0.002, Kd=100.0 — ṁ=18 kg/s, τ=347s 기준)")
-    print(f"    (변경: τ 347s→214s, ṁ 18→44 kg/s, C_eff 6281→9459 kJ/K 반영)")
+    print(f"    (변경: C_eff 6281→9009 kJ/K, ṁ 18→44 kg/s, CPU 400대+GPU 20대 반영)")
 
     # ────────────────────────────────────────────────────────────────────
     # [3단계] 최종 게인값으로 4개 시나리오 상세 출력
@@ -361,7 +360,7 @@ if __name__ == "__main__":
                       n_crah_schedule=DEFAULT_N_CRAH_ACTIVE)
     _print_scenario(
         "시나리오 1: 정상 운영 → 서버 부하 급증 (+30%)",
-        f"IT 160→208kW / 외기 22°C / CRAH {DEFAULT_N_CRAH_ACTIVE}대 정상 | "
+        f"IT {IT_BASE_KW:.0f}→{IT_CRISIS_KW:.0f}kW (CPU {NUM_CPU}대+GPU {NUM_GPU}대, +30%) / 외기 22°C / CRAH {DEFAULT_N_CRAH_ACTIVE}대 정상 | "
         f"ṁ={m_dot_normal:.1f}kg/s, 칠러 1대={cfg.chiller_design_kw*cop_normal:.0f}kW 열",
         r1, "IT부하", lambda r: f"{r.q_in_kw:.0f}kW",
     )
@@ -375,37 +374,23 @@ if __name__ == "__main__":
                       n_crah_schedule=DEFAULT_N_CRAH_ACTIVE)
     _print_scenario(
         "시나리오 2: 정상 운영 → 폭염 (외기 온도 급상승)",
-        f"외기 22→42°C / IT 160kW / CRAH {DEFAULT_N_CRAH_ACTIVE}대 정상 | "
+        f"외기 22→42°C / IT {IT_BASE_KW:.0f}kW / CRAH {DEFAULT_N_CRAH_ACTIVE}대 정상 | "
         f"칠러 1대 COP 5.3→3.3, 냉각 한도 {cfg.chiller_design_kw*cop_normal:.0f}→{cfg.chiller_design_kw*cop_crisis_s2:.0f}kW 열",
         r2, "외기온도", lambda r: f"{r.outdoor_temp_c:.0f}°C",
     )
     _energy_analysis("S2: 폭염", r2)
 
-    # 시나리오 3: CRAH 1대 고장 — 전환 구간 60s 동안 3→2대, 이후 예비 투입으로 복구
-    m_dot_2crah = cfg.m_dot_per_crah * 2
+    # 시나리오 3: 칠러 고장 — 전환 구간(160s) 동안 냉각 불가, 이후 예비 칠러 투입
     sim3 = ThermalSimulator(ThermalSimulatorConfig())
     r3 = run_pid_loop(STEPS, it_s3, PIDController(kp=KP, ki=ki_best, kd=kd_best),
-                      sim3, outdoor_temp_c_schedule=22.0, n_crah_schedule=n_crah_s3,
-                      zone_target_c=ZONE_TARGET_C)
-    _print_scenario(
-        f"시나리오 3: CRAH 1대 고장 → 전환 구간 {CRAH_TRANSITION_S}s → 예비 투입",
-        f"CRAH 3→2→3대 / IT 160kW / 외기 22°C | "
-        f"전환 중 ṁ {m_dot_normal:.0f}→{m_dot_2crah:.0f}kg/s, 칠러 유지",
-        r3, "CRAH대수", lambda r: f"{r.n_crah}대",
-    )
-    _energy_analysis("S3: CRAH 고장·전환", r3)
-
-    # 시나리오 4: 칠러 고장 — 전환 구간 120s 동안 냉각 불가, 이후 예비 칠러 투입
-    sim4 = ThermalSimulator(ThermalSimulatorConfig())
-    r4 = run_pid_loop(STEPS, it_s4, PIDController(kp=KP, ki=ki_best, kd=kd_best),
-                      sim4, outdoor_temp_c_schedule=22.0,
+                      sim3, outdoor_temp_c_schedule=22.0,
                       zone_target_c=ZONE_TARGET_C,
                       n_crah_schedule=DEFAULT_N_CRAH_ACTIVE,
-                      chiller_scale_schedule=chiller_scale_s4)
+                      chiller_scale_schedule=chiller_scale_s3)
     _print_scenario(
-        f"시나리오 4: 칠러 고장 → 전환 구간 {CHILLER_TRANSITION_S}s → 예비 투입",
-        f"칠러 scale 1→0→1 / CRAH {DEFAULT_N_CRAH_ACTIVE}대 유지 / IT 160kW / 외기 22°C | "
+        f"시나리오 3: 칠러 고장 → 전환 구간 {CHILLER_TRANSITION_S}s → 예비 투입",
+        f"칠러 scale 1→0→1 / CRAH {DEFAULT_N_CRAH_ACTIVE}대 유지 / IT {IT_BASE_KW:.0f}kW / 외기 22°C | "
         f"전환 중 Q_out=0 (냉각 불가)",
-        r4, "칠러상태", lambda r: f"{'고장중' if CRISIS_START <= r.step - 1 < CRISIS_START + CHILLER_TRANSITION_S else '정상'}",
+        r3, "칠러상태", lambda r: f"{'고장중' if CRISIS_START <= r.step - 1 < CRISIS_START + CHILLER_TRANSITION_S else '정상'}",
     )
-    _energy_analysis("S4: 칠러 고장·전환", r4)
+    _energy_analysis("S3: 칠러 고장·전환", r3)
