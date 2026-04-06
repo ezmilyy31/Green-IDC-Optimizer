@@ -3,34 +3,100 @@
 from dataclasses import dataclass, field
 
 """
-`u(t) = Kp·e(t) + Ki·∫e(t)dt + Kd·de(t)/dt`
+Incremental (velocity) PID:
+  supply[t] = supply[t-1] + Kp·Δe + Ki·e·dt + Kd·(Δe/dt)
 
-- `e(t)` : 목표 온도 - 현재 온도 (오차)
-- `Kp` (비례): 오차에 즉각 반응. 너무 크면 진동 발생
-- `Ki` (적분): 누적 오차 제거. 정상 상태 오차 보정
-- `Kd` (미분): 오차 변화율 예측. 과도 반응 억제
-- `rule_based.py`에서 공급 온도를 조절해 서버 온도 18~27°C 유지 (유지율 95%+ 필수)
-- 비례 게인은 추후 시뮬레이션 돌려보면서 최적값 찾아야 함 
+위치형(position) PID 대신 incremental PID를 사용하는 이유:
+  - 위치형: output = Kp·e + Ki·∫e·dt + Kd·de/dt
+    → output이 공급 온도 절댓값을 직접 계산
+    → 큰 초기 오차에서 항상 clamp에 걸려 Kp 크기에 무관하게 bang-bang 동작
+  - incremental: output = 이전 공급 온도 + PID가 계산한 변화량
+    → 공급 온도가 점진적으로 조절됨
+    → Kp가 "온도 변화량에 대한 공급 온도 변화율"로 물리적 의미를 가짐
+
+게인값 (IMC 기반 + sweep 튜닝, 정상 운영 CRAH 3대 기준):
+  Kp = 1.0   → 오차 1°C당 공급 온도 1°C/s 조정
+  Ki = 0.001 → 정상 상태 오차 제거 (IMC 기준 Ki_imc ≈ 0.0035, sweep 결과 0.001 채택)
+  Kd = 0.0   → S4 칠러 고장 복구 시 과보상 방지 (Kd 클수록 회복 속도 저하 확인)
+
+  도출 근거:
+  - 시스템 유효 열용량: C_eff = 9,459 kJ/K
+    (공기 1,809 + 서버장비 5,000 + 랙 650 + 구조물 2,000)
+  - 정상 운영 공기 유량: ṁ·cp = 33 kg/s × 1.005 kJ/kg·K = 33.2 kW/K  (CRAH 3대)
+  - 열적 시정수: τ = C_eff / (ṁ·cp) = 9,459 / 33.2 = 285초
+  - IMC 공식: Kp_imc = 1.0, Ki_imc = Kp / τ ≈ 0.0035
+
+고정 setpoint:
+  - 서버실 목표 온도 24°C 고정 (zone_target_c 파라미터로 주입)
+  - 초기화: supply = T_zone - Q_in/(ṁ·cp) (평형 공급온도), _prev_error = 0
+
+Anti-windup: 조건부 적분
+  - supply가 output_min/max에 도달하면 적분 누적 중단
 """
+
+# 검증된 게인값 (incremental PID, IMC 기반 + sweep 튜닝, CRAH 3대 정상 운영 기준)
+DEFAULT_KP = 1.0
+DEFAULT_KI = 0.001
+DEFAULT_KD = 0.0
+
+# CRAH 공급 온도 물리적 한계 (°C)
+SUPPLY_TEMP_MIN_C = 18.0
+SUPPLY_TEMP_MAX_C = 27.0
+
 
 @dataclass
 class PIDController:
-    kp: float # 비례 게인, 각 값들은 초기값 정한 후 추후 Sinergym 시뮬레이션 -> 최적값 찾기 
-    ki: float # 적분 게인
-    kd: float # 미분 게인
-    setpoint: float # 목표 값
-    
-    _prev_error: float = field(default = 0.0, init = False) # 이전 오차
-    _integral: float = field(default = 0.0, init = False) # 누적 오차
+    kp: float = DEFAULT_KP
+    ki: float = DEFAULT_KI
+    kd: float = DEFAULT_KD
+    setpoint: float = 24.0       # 목표 서버실 온도 (°C), run_pid_loop에서 zone_target_c로 고정 주입
+    output_min: float = SUPPLY_TEMP_MIN_C
+    output_max: float = SUPPLY_TEMP_MAX_C
+
+    _prev_error: float = field(default=0.0, init=False)
+    _supply: float = field(default=SUPPLY_TEMP_MAX_C, init=False)  # 이전 공급 온도, 초기값=최대
 
     def compute(self, current_value: float, dt: float = 1.0) -> float:
-        error = self.setpoint - current_value # e(t)
-        self._integral += error * dt # 누적 오차 (Ki·∫e(t)dt )
-        derivative = (error - self._prev_error) / dt # 변화율 (Kd·de(t)/dt)
+        """
+        Incremental PID로 공급 온도 변화량을 계산하고 공급 온도를 갱신한다.
+
+        Args:
+            current_value: 현재 서버실 온도 (°C)
+            dt: 시간 스텝 (초)
+
+        Returns:
+            CRAH 공급 온도 설정값 (°C)
+        """
+        error = self.setpoint - current_value
+        delta_error = error - self._prev_error
+
+        delta_supply = self.kp * delta_error + self.ki * error * dt + self.kd * (delta_error / dt)
+
+        # anti-windup: supply가 한계에 도달하면 적분항만 중단
+        new_supply = self._supply + delta_supply
+        if new_supply <= self.output_min or new_supply >= self.output_max:
+            delta_supply = self.kp * delta_error + self.kd * (delta_error / dt)
+            new_supply = self._supply + delta_supply
+
+        self._supply = max(self.output_min, min(self.output_max, new_supply))
         self._prev_error = error
 
-        return self.kp * error + self.ki * self._integral + self.kd * derivative
+        return self._supply
 
     def reset(self) -> None:
         self._prev_error = 0.0
-        self._integral = 0.0
+        self._supply = self.output_max
+
+
+@dataclass
+class PIDLoopResult:
+    """단일 스텝 PID 제어 시뮬레이션 결과"""
+
+    step: int
+    t_zone_c: float           # 서버실 온도 (°C)
+    supply_temp_c: float      # CRAH 공급 온도 설정값 (°C)
+    q_in_kw: float            # IT 발열량 (kW)
+    q_out_kw: float           # 실제 냉각량 (kW)
+    error_c: float            # 오차 = setpoint - T_zone (°C)
+    outdoor_temp_c: float     # 해당 스텝의 외기 온도 (°C)
+    n_crah: int               # 해당 스텝의 가동 CRAH 대수 (대수 감소 시 ṁ·칠러 용량 동시 감소)
