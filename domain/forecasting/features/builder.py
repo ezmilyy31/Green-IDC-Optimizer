@@ -270,6 +270,10 @@ def build_train_features(df: pd.DataFrame, target_col: str = IT_TARGET_COL) -> p
     """
     df = df.copy()
     
+    # 데이터 형 변환 보장 (timestamp 컬럼이 datetime 형식인지 확인)
+    if 'timestamp' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+
     # 컬럼명 동기화
     rename_map = {"outside_temp_c": "outdoor_temp_c", "outside_humidity_pct": "outdoor_humidity"}
     df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
@@ -290,18 +294,28 @@ def build_train_features(df: pd.DataFrame, target_col: str = IT_TARGET_COL) -> p
     df['humidity_temp_index'] = df['outdoor_temp_c'] * df['outdoor_humidity']
 
     # 3. IT 부하 관련 변수 (★ 냉방 수요 예측의 핵심 피처)
-    # forecast.py 추론 시 넘겨받는 'predicted_it_power_kw'를 학습 시에는 실제 정답 데이터로 세팅합니다.
     df['predicted_it_power_kw'] = df[IT_TARGET_COL] 
     
     df['it_power_kw_lag_1'] = df[IT_TARGET_COL].shift(1)
+    df['it_power_kw_lag_2'] = df[IT_TARGET_COL].shift(2)   # 누락되어 있던 lag 추가
+    df['it_power_kw_lag_12'] = df[IT_TARGET_COL].shift(12) # 누락되어 있던 lag 추가
+
     df['it_power_x_outdoor_temp'] = df['it_power_kw_lag_1'] * df['outdoor_temp_c']
     df['free_cooling_x_it_power'] = df['free_cooling_available'] * df['it_power_kw_lag_1']
+    
+    # 추가된 파생 변수 (에러 났던 부분 해결)
+    df['it_power_x_humidity'] = df['it_power_kw_lag_1'] * df['outdoor_humidity']
+    
+    # Diff 변수 이름을 명확하게 고정 (에러 났던 부분 해결)
+    df['it_power_diff_1'] = df['it_power_kw_lag_1'] - df['it_power_kw_lag_2']
+    df['it_power_diff_12'] = df['it_power_kw_lag_1'] - df['it_power_kw_lag_12']
 
-    # 4. 동적 Target Lag & Diff Features (IT 부하든 냉방 부하든 입력된 타겟에 맞춰 생성)
-    df[f'{target_col}_lag_1'] = df[target_col].shift(1)
-    df[f'{target_col}_lag_2'] = df[target_col].shift(2)
-    df[f'{target_col}_lag_12'] = df[target_col].shift(12)
-    df[f'{target_col}_diff_1'] = df[f'{target_col}_lag_1'] - df[f'{target_col}_lag_2']
-    df[f'{target_col}_diff_12'] = df[f'{target_col}_lag_1'] - df[f'{target_col}_lag_12']
+    # 4. 동적 Target Lag & Diff Features (만약 target_col이 IT_TARGET_COL이 아닐 경우를 대비)
+    if target_col != IT_TARGET_COL:
+        df[f'{target_col}_lag_1'] = df[target_col].shift(1)
+        df[f'{target_col}_lag_2'] = df[target_col].shift(2)
+        df[f'{target_col}_lag_12'] = df[target_col].shift(12)
+        df[f'{target_col}_diff_1'] = df[f'{target_col}_lag_1'] - df[f'{target_col}_lag_2']
+        df[f'{target_col}_diff_12'] = df[f'{target_col}_lag_1'] - df[f'{target_col}_lag_12']
 
     return df.dropna().reset_index(drop=True)
