@@ -67,7 +67,7 @@ CRISIS_STRATEGIES: dict[str, str] = {
 
 SCENARIO_TEMP_PROFILES: dict[str, dict] = {
     "여름 (Summer)":    {"base": 30.0, "amplitude": 6.0},
-    "봄/가을 (Spring)": {"base": 15.0, "amplitude": 8.0},
+    "봄/가을 (Spring/Fall)": {"base": 15.0, "amplitude": 8.0},
     "겨울 (Winter)":    {"base": 2.0,  "amplitude": 6.0},
 }
 
