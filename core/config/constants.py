@@ -8,10 +8,10 @@ FAN_POWER_RATIO_FREE = 0.035      # 자연공조 시 팬 전력 (3.5%)
 FAN_POWER_RATIO_CHILLER = 0.08    # 기계식 냉방 시 팬 전력 (8%)
 
 # 냉각 부하 설계 파라미터 (SyntheticIDCBuilder 기준, p.15-16)
-T_SUPPLY_DESIGN_C = 18.0          # CRAH 공급 온도 설계값 (°C)
+T_SUPPLY_DESIGN_C = 20.0          # CRAH 공급 온도 설계값 (°C)
 T_RETURN_DESIGN_C = 27.0          # 환기 온도 설계값 (°C)
-M_AIR_DESIGN_KG_S = 50.0          # 설계 공기 유량 (kg/s) — 서버 500대 기준
-NUM_SERVERS_DESIGN = 500           # 설계 기준 서버 수
+M_AIR_DESIGN_KG_S = 40.0          # 설계 공기 유량 (kg/s) — 서버 400대 기준
+NUM_SERVERS_DESIGN = 400           # 설계 기준 서버 수
 
 # 서버 전력 스펙 (SPECpower_ssj2008 기준)
 CPU_SERVER_P_IDLE_W = 200.0        # CPU 서버 유휴 전력 (W, Intel Xeon 기준)
@@ -67,7 +67,7 @@ CRISIS_STRATEGIES: dict[str, str] = {
 
 SCENARIO_TEMP_PROFILES: dict[str, dict] = {
     "여름 (Summer)":    {"base": 30.0, "amplitude": 6.0},
-    "봄/가을 (Spring)": {"base": 15.0, "amplitude": 8.0},
+    "봄/가을 (Spring/Fall)": {"base": 15.0, "amplitude": 8.0},
     "겨울 (Winter)":    {"base": 2.0,  "amplitude": 6.0},
 }
 

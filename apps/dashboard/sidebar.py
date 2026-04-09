@@ -103,13 +103,13 @@ def render_sidebar() -> dict:
 
         st.divider()
         _sec("서버 구성")
-        num_cpu  = st.slider("CPU 서버 대수", 100, 1000, 400, step=50)
-        num_gpu  = st.slider("GPU 서버 대수", 0, 200, 20, step=10)
+        num_cpu  = 400
+        num_gpu  = 20
         cpu_util = st.slider("평균 CPU 사용률 (%)", 10, 100, 60) / 100.0
 
         st.divider()
         _sec("냉각 설정")
-        supply_temp = st.slider("CRAH 공급 온도 (°C)", 14, 24, 18)
+        supply_temp = st.slider("CRAH 공급 온도 (°C)", 16, 24, 21)
 
         st.divider()
         _sec("위기 시나리오")
