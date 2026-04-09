@@ -10,7 +10,7 @@ FAN_POWER_RATIO_CHILLER = 0.08    # 기계식 냉방 시 팬 전력 (8%)
 # 냉각 부하 설계 파라미터 (SyntheticIDCBuilder 기준, p.15-16)
 T_SUPPLY_DESIGN_C = 20.0          # CRAH 공급 온도 설계값 (°C)
 T_RETURN_DESIGN_C = 27.0          # 환기 온도 설계값 (°C)
-M_AIR_DESIGN_KG_S = 40.0          # 설계 공기 유량 (kg/s) — 서버 400대 기준
+M_AIR_DESIGN_KG_S = 33.0          # 설계 공기 유량 (kg/s) — CRAH 3대 정상 운영 기준 (4대×11 kg/s 중 3대 가동)
 NUM_SERVERS_DESIGN = 400           # 설계 기준 서버 수
 
 # 서버 전력 스펙 (SPECpower_ssj2008 기준)
