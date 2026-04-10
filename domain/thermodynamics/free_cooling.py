@@ -32,7 +32,7 @@ class FreeCoolingResult:
 def calculate_free_cooling_efficiency(
     outdoor_temp_c: float,
     outdoor_humidity_pct: float = 50.0,
-    supply_temp_setpoint_c: float = 18.0,
+    supply_temp_setpoint_c: float = 20.0,
 ) -> float:
     """
     외기 조건에 따른 자연공조 효율을 계산한다.
@@ -81,7 +81,7 @@ def calculate_free_cooling(
     cooling_load_kw: float,
     outdoor_temp_c: float,
     outdoor_humidity_pct: float = 50.0,
-    supply_temp_setpoint_c: float = 18.0,
+    supply_temp_setpoint_c: float = 20.0,
 ) -> FreeCoolingResult:
     """
     자연공조로 처리 가능한 냉각량과 팬 전력을 계산한다.
