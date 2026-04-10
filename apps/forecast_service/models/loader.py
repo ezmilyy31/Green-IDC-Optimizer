@@ -10,7 +10,8 @@ Forecast Service model loader.
 
 이 파일의 책임
 --------------
-- FastAPI startup시기 호출되어, IT Load / Cooling Demand용 LGBM, LSTM 모델을 모두 로드한다.
+- FastAPI startup 시기 호출되어, IT Load / Cooling Demand용 LGBM, LSTM 모델을 모두 로드한다.
+- 새롭게 추가된 Quantile Regression 모델(Lower, Point, Upper)도 함께 로드한다.
 - 외기 예보, feature 기본값, interval 설정 등 부가 리소스를 로드한다.
 - services/forecast.py에서 바로 사용할 수 있는 model_bundle 형태로 반환한다.
 """
@@ -43,6 +44,8 @@ def _load_json_if_exists(
 def _load_lgbm_if_exists(file_path: Path) -> LGBMForecaster | None:
     if not file_path.exists():
         return None
+    # 확장자가 .pkl이든 .joblib이든 동일하게 joblib.load를 수행하도록 
+    # LGBMForecaster.load() 내부에 구현되어 있다고 가정.
     return LGBMForecaster.load(file_path)
 
 
@@ -61,6 +64,17 @@ def _try_load_lstm_if_exists(file_path: Path) -> Any | None:
     return LSTMForecaster.load(file_path)
 
 
+def _check_any_model_loaded(models_dict: dict) -> bool:
+    """중첩된 딕셔너리를 순회하며 로드된 모델이 하나라도 있는지 확인합니다."""
+    for value in models_dict.values():
+        if isinstance(value, dict):
+            if _check_any_model_loaded(value):
+                return True
+        elif value is not None:
+            return True
+    return False
+
+
 def load_model_bundle() -> dict[str, Any]:
     model_dir = _resolve_model_dir()
 
@@ -69,10 +83,20 @@ def load_model_bundle() -> dict[str, Any]:
         "models": {
             "it_load": {
                 "lgbm": _load_lgbm_if_exists(model_dir / "it_load_lgbm.joblib"),
+                "lgbm_quantile": {
+                    "lower": _load_lgbm_if_exists(model_dir / "lgbm_quantile_it_load_lower.pkl"),
+                    "point": _load_lgbm_if_exists(model_dir / "lgbm_quantile_it_load_point.pkl"),
+                    "upper": _load_lgbm_if_exists(model_dir / "lgbm_quantile_it_load_upper.pkl"),
+                },
                 "lstm": _try_load_lstm_if_exists(model_dir / "it_load_lstm.pt"),
             },
             "cooling_demand": {
                 "lgbm": _load_lgbm_if_exists(model_dir / "cooling_demand_lgbm.joblib"),
+                "lgbm_quantile": {
+                    "lower": _load_lgbm_if_exists(model_dir / "lgbm_quantile_cooling_demand_lower.pkl"),
+                    "point": _load_lgbm_if_exists(model_dir / "lgbm_quantile_cooling_demand_point.pkl"),
+                    "upper": _load_lgbm_if_exists(model_dir / "lgbm_quantile_cooling_demand_upper.pkl"),
+                },
                 "lstm": _try_load_lstm_if_exists(model_dir / "cooling_demand_lstm.pt"),
             },
         },
@@ -96,13 +120,8 @@ def load_model_bundle() -> dict[str, Any]:
         ),
     }
 
-    any_model_loaded = any(
-        model is not None
-        for target_models in bundle["models"].values()
-        for model in target_models.values()
-    )
-
-    if not any_model_loaded:
+    # 변경된 로직: 중첩 딕셔너리 구조(lgbm_quantile)까지 안전하게 검사
+    if not _check_any_model_loaded(bundle["models"]):
         raise FileNotFoundError(
             "No forecast model artifact found in MODEL_DIR. "
             f"Checked directory: {model_dir}"
