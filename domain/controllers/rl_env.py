@@ -10,7 +10,7 @@ import sinergym  # noqa: F401 — 환경 등록용
 
 from core.schemas.rl_interface import FILTERED_OBS_KEYS, OBS_INDEX
 
-ENV_ID = "Eplus-datacenter_dx-mixed-continuous-stochastic-v1"
+ENV_ID = "Eplus-datacenter-mixed-continuous-stochastic-v1"
 
 # 서버실 온도 제약 (명세서: 18~27°C)
 TEMP_UPPER_LIMIT = 27.0
@@ -36,9 +36,9 @@ class DataCenterRLEnv(gym.Wrapper):
         self._step_count = 0
 
         # filtered obs space 재정의 (변수별 실제 범위)
-        obs_low = np.array([1, 0, -30, 0, 15, 15, 20, 0, 0], dtype=np.float32)
-        obs_high = np.array([12, 23, 50, 100, 40, 40, 30, 1, 5e5], dtype=np.float32)
-        # 순서: month, hour, outdoor_temp, humidity, east_temp, west_temp, setpoint, cpu_load, hvac_power
+        obs_low = np.array([1, 0, -30, 0, 15, 15, 20, 0], dtype=np.float32)
+        obs_high = np.array([12, 23, 50, 100, 40, 40, 30, 5e5], dtype=np.float32)
+        # 순서: month, hour, outdoor_temp, humidity, east_temp, west_temp, clg_setpoint, hvac_power
         self.observation_space = gym.spaces.Box(
             low=obs_low, high=obs_high, dtype=np.float32,
         )
@@ -61,7 +61,7 @@ class DataCenterRLEnv(gym.Wrapper):
         커스텀 보상: PUE 최소화 + 온도 위반 패널티
         east_temp = obs[4]       # east_zone_air_temperature
         west_temp = obs[5]       # west_zone_air_temperature
-        hvac_power = obs[8]      # HVAC_electricity_demand_rate
+        hvac_power = obs[7]      # HVAC_electricity_demand_rate
 
         zone_temp = max(east_temp, west_temp)
         temp_penalty = max(0, zone_temp - 27) * 10
