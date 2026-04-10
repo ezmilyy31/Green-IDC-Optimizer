@@ -1,4 +1,4 @@
-"""PPO 학습 스크립트 — Sinergym datacenter_dx 환경.
+"""PPO 학습 스크립트 — Sinergym datacenter-mixed-continuous-stochastic-v1 환경.
 
 사용법:
     python -m domain.controllers.rl_agent --total-timesteps 50000 --run-name baseline
@@ -20,7 +20,7 @@ LOG_DIR = Path("data/models/ppo_logs")
 MODEL_DIR = Path("data/models")
 
 
-def make_env(max_episode_steps: int = 144):
+def make_env(max_episode_steps: int = 96):
     return DataCenterRLEnv(max_episode_steps=max_episode_steps)
 
 
@@ -30,7 +30,7 @@ def train(
     batch_size: int = 64,
     gamma: float = 0.99,
     total_timesteps: int = 50_000,
-    max_episode_steps: int = 144,
+    max_episode_steps: int = 96,
     run_name: str = "ppo-baseline",
     device: str = "auto",
     resume: str | None = None,
@@ -127,7 +127,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=64, help="mini-batch size")
     parser.add_argument("--gamma", type=float, default=0.99, help="discount factor")
     parser.add_argument("--total-timesteps", type=int, default=50_000, help="총 학습 step")
-    parser.add_argument("--max-episode-steps", type=int, default=144, help="에피소드 길이 (144=1일)")
+    parser.add_argument("--max-episode-steps", type=int, default=96, help="에피소드 길이 (96=1일, 15분 간격)")
     parser.add_argument("--run-name", type=str, default="ppo-baseline", help="실험 이름")
     parser.add_argument("--device", type=str, default="auto", help="auto|cuda|cpu")
     parser.add_argument("--resume", type=str, default=None, help="이어서 학습할 모델 경로")
