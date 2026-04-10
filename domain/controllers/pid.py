@@ -38,7 +38,7 @@ Anti-windup: 조건부 적분
 # 검증된 게인값 (incremental PID, IMC 기반 + sweep 튜닝, CRAH 3대 정상 운영 기준)
 DEFAULT_KP = 1.0
 DEFAULT_KI = 0.001
-DEFAULT_KD = 1.0
+DEFAULT_KD = 0.5
 
 # CRAH 공급 온도 물리적 한계 (°C)
 SUPPLY_TEMP_MIN_C = 16.0
