@@ -308,15 +308,16 @@ carbon_tco2 = (P_total_kW * hours / 1000) * 0.459
 
 ## 9. 벤치마크 비교
 
-### Sinergym 검증 기준
+### 자체 내부 검증 기준
 
-본 열역학 모델은 Sinergym(EnergyPlus 기반) 시뮬레이션과 비교하여 **오차 10% 이내**를 목표로 합니다.
+Sinergym(EnergyPlus) 대비 오차 검증은 팀 합의로 생략하고, **자체 열역학 모델 내부 검증**으로 대체합니다.
+(명세서3 변경 사항: 모델 범위 차이로 의미 있는 비교 불가 — Sinergym은 RL 학습 환경으로만 선택 활용)
 
 ```
-검증 항목:
-  - 냉각 부하 (kW): 자체 모델 vs Sinergym 오차 < 10%
-  - 칠러 전력 (kW): 자체 모델 vs Sinergym 오차 < 10%
-  - PUE: 자체 모델 vs Sinergym 오차 < 10%
+내부 검증 항목:
+  - 에너지 보존 법칙: Q_cooling ≈ P_IT (정상 상태 기준)
+  - COP 범위: 외기 온도별 COP가 물리적 범위(2.0~6.0) 내에 있는지 확인
+  - PUE 범위: 1.0 < PUE < 3.0 (외기 온도 -10~45°C 범위에서)
 ```
 
 ### 예상 결과 범위
@@ -333,7 +334,7 @@ carbon_tco2 = (P_total_kW * hours / 1000) * 0.459
 
 ---
 
-*작성: AI Green IDC Team | 참조: SPECpower_ssj2008, ASHRAE TC 9.9, Sinergym (EnergyPlus 24.1.0)*
+*작성: AI Green IDC Team | 참조: SPECpower_ssj2008, ASHRAE TC 9.9*
 
 > 코드 구현 가이드는 [`domain/thermodynamics/README.md`](../domain/thermodynamics/README.md)를 참조하세요.
 
