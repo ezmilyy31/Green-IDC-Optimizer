@@ -20,17 +20,18 @@ LOG_DIR = Path("data/models/ppo_logs")
 MODEL_DIR = Path("data/models")
 
 
-def make_env(max_episode_steps: int = 96):
-    return DataCenterRLEnv(max_episode_steps=max_episode_steps)
+def make_env(max_episode_steps: int = 96, w_energy: float = 0.5):
+    return DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy)
 
 
 def train(
-    lr: float = 3e-4,   
-    n_steps: int = 2048, 
+    lr: float = 3e-4,
+    n_steps: int = 2048,
     batch_size: int = 64,
     gamma: float = 0.9,
     total_timesteps: int = 50_000,
     max_episode_steps: int = 96,
+    w_energy: float = 0.5,
     run_name: str = "ppo-baseline",
     device: str = "auto",
     resume: str | None = None,
@@ -43,7 +44,8 @@ def train(
         batch_size: 미니배치 크기
         gamma: discount factor
         total_timesteps: 총 학습 step 수
-        max_episode_steps: 에피소드 최대 길이 (144 = 1일)
+        max_episode_steps: 에피소드 최대 길이 (96 = 1일)
+        w_energy: 보상 함수 에너지 항 가중치 (0~1)
         run_name: 실험 이름 (로그/모델 저장 경로에 사용)
         device: "auto" | "cuda" | "cpu"
         resume: 이어서 학습할 모델 경로 (없으면 처음부터)
@@ -54,7 +56,7 @@ def train(
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    env = make_env(max_episode_steps)
+    env = make_env(max_episode_steps, w_energy)
 
     # 체크포인트 콜백: 10k step마다 저장
     checkpoint_cb = CheckpointCallback(
@@ -130,6 +132,7 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99, help="discount factor")
     parser.add_argument("--total-timesteps", type=int, default=50_000, help="총 학습 step")
     parser.add_argument("--max-episode-steps", type=int, default=96, help="에피소드 길이 (96=1일, 15분 간격)")
+    parser.add_argument("--w-energy", type=float, default=0.5, help="보상 에너지 항 가중치 (0~1)")
     parser.add_argument("--run-name", type=str, default="ppo-baseline", help="실험 이름")
     parser.add_argument("--device", type=str, default="auto", help="auto|cuda|cpu")
     parser.add_argument("--resume", type=str, default=None, help="이어서 학습할 모델 경로")
@@ -145,6 +148,7 @@ if __name__ == "__main__":
         gamma=args.gamma,
         total_timesteps=args.total_timesteps,
         max_episode_steps=args.max_episode_steps,
+        w_energy=args.w_energy,
         run_name=args.run_name,
         device=args.device,
         resume=args.resume,
