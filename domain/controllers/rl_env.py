@@ -1,7 +1,7 @@
-"""Sinergym datacenter_dx 환경 래퍼. [obs 필터링 + 에피소드 길이 제한]
+"""Sinergym datacenter-mixed 환경 래퍼. [obs 필터링 + 에피소드 길이 제한 + 커스텀 보상]
 
-Sinergym의 obs 37개를 핵심 9개로 필터링하고,
-보상 함수는 Sinergym 기본 제공(energy + comfort)을 그대로 사용한다.
+Sinergym의 obs 28개를 핵심 8개로 필터링하고,
+커스텀 보상 함수로 East+West 양존 온도 패널티를 반영한다.
 """
 
 import gymnasium as gym
@@ -21,19 +21,24 @@ class DataCenterRLEnv(gym.Wrapper):
     """Sinergym 데이터센터 환경을 프로젝트에 맞게 래핑.
 
     변경점:
-    - obs: 37개 → 9개 (핵심 변수만 필터링)
+    - obs: 28개 → 8개 (핵심 변수만 필터링)
     - action: 그대로 (cooling_setpoint 1개, [20, 30])
-    - reward: Sinergym 기본 보상 사용 (energy_term + comfort_term)
+    - reward: 커스텀 보상 (East+West 양존 온도 패널티 + 에너지 항)
     """
 
-    def __init__(self, max_episode_steps: int | None = None):
+    def __init__(self, max_episode_steps: int | None = None, w_energy: float = 0.5):
+        """
+        Args:
+            max_episode_steps: 에피소드 최대 길이 (96 = 1일)
+            w_energy: 에너지 항 가중치 (0~1). 높을수록 에너지 절감 중시.
+                      온도 항 가중치 = 1 - w_energy
+        """
         env = gym.make(ENV_ID) # Sinergym 환경 생성
         super().__init__(env) # gym.Wrapper에 등록
 
-        # observation space를 필터링된 크기로 재정의
-
         self._max_episode_steps = max_episode_steps
         self._step_count = 0
+        self._w_energy = w_energy
 
         # filtered obs space 재정의 (변수별 실제 범위)
         obs_low = np.array([1, 0, -30, 0, 15, 15, 20, 0], dtype=np.float32)
@@ -57,20 +62,22 @@ class DataCenterRLEnv(gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self._step_count += 1
 
-        """
-        커스텀 보상: PUE 최소화 + 온도 위반 패널티
-        east_temp = obs[4]       # east_zone_air_temperature
-        west_temp = obs[5]       # west_zone_air_temperature
-        hvac_power = obs[7]      # HVAC_electricity_demand_rate
+        # 커스텀 보상: East+West 양존 온도 패널티 + 에너지 항
+        filtered = self._filter_obs(obs)
+        east_temp  = filtered[4]   # east_zone_air_temperature
+        west_temp  = filtered[5]   # west_zone_air_temperature
+        hvac_power = filtered[7]   # HVAC_electricity_demand_rate
 
-        zone_temp = max(east_temp, west_temp)
-        temp_penalty = max(0, zone_temp - 27) * 10
-        custom_reward = -hvac_power / 1e4 - temp_penalty
-        
-        """
+        east_penalty = max(0, east_temp - TEMP_UPPER_LIMIT) + max(0, TEMP_LOWER_LIMIT - east_temp)
+        west_penalty = max(0, west_temp - TEMP_UPPER_LIMIT) + max(0, TEMP_LOWER_LIMIT - west_temp)
+
+        energy_term  = -0.0001 * hvac_power
+        comfort_term = -(east_penalty + west_penalty)
+
+        reward = self._w_energy * energy_term + (1 - self._w_energy) * comfort_term
 
         # 에피소드 길이 제한 (선택)
         if self._max_episode_steps and self._step_count >= self._max_episode_steps:
             truncated = True
 
-        return self._filter_obs(obs), reward, terminated, truncated, info
+        return filtered, reward, terminated, truncated, info
