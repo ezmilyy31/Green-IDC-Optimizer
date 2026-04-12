@@ -47,6 +47,11 @@ selected_features = [
     "temp_above_15c", 
     "temp_below_15c", 
     "free_cooling_available",
+    # --- 새로 추가된 열역학 피처 ---
+    "theoretical_cooling_load",
+    "theoretical_cop",
+    "free_cooling_efficiency",
+    # -----------------------------
     f"{TARGET_COL}_lag_1",    # 5분 전 칠러 전력
     f"{TARGET_COL}_lag_2",    # 10분 전 칠러 전력
     f"{TARGET_COL}_lag_12",   # 1시간 전 칠러 전력

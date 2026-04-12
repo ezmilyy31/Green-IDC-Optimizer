@@ -6,6 +6,10 @@ from typing import Any
 
 from core.config.constants import FREE_COOLING_THRESHOLD_C
 
+from domain.thermodynamics.cooling_load import calculate_cooling_load_from_it_power_kw
+from domain.thermodynamics.free_cooling import calculate_free_cooling_efficiency
+from domain.thermodynamics.chiller import calculate_cop
+
 """
 Feature Engineering 모듈
 학습(Train) 시의 벡터화 연산과 추론(Inference) 시의 실시간 Row 생성 로직을 통합 관리합니다.
@@ -160,6 +164,23 @@ def _build_next_feature_row(
     row.setdefault("free_cooling_available", row["outdoor_temp_c"] <= FREE_COOLING_THRESHOLD_C)
     row.setdefault("cooling_degree_days", max(float(row["outdoor_temp_c"]) - 18.0, 0.0))
 
+    # --- 열역학 기반 파생 변수 ---
+    
+    # 1. 이론적 냉각 부하량 (Q)
+    # cooling_demand를 예측할 때는 auxiliary_it_map 등에서 가져온 predicted_it_power_kw를 사용
+    base_it_for_cooling = row.get("predicted_it_power_kw", _last_or_default(simulated_history, IT_TARGET_COL, defaults.get(IT_TARGET_COL, 0.0)))
+    row["theoretical_cooling_load"] = calculate_cooling_load_from_it_power_kw(float(base_it_for_cooling))
+
+    # 2. 물리적 성능 계수 (COP)
+    row["theoretical_cop"] = calculate_cop(float(row["outdoor_temp_c"]))
+
+    # 3. 프리쿨링 효율 
+    row["free_cooling_efficiency"] = calculate_free_cooling_efficiency(
+        outdoor_temp_c=float(row["outdoor_temp_c"]),
+        outdoor_humidity_pct=float(row.get("outdoor_humidity", 50.0))
+    )
+    # ------------------------------------
+
     if target_name == "cooling_demand":
         predicted_it_value = None
         if auxiliary_it_map is not None:
@@ -295,6 +316,31 @@ def build_train_features(df: pd.DataFrame, target_col: str = IT_TARGET_COL) -> p
 
     # 3. IT 부하 관련 변수 (★ 냉방 수요 예측의 핵심 피처)
     df['predicted_it_power_kw'] = df[IT_TARGET_COL] 
+
+    # --- 열역학 기반 파생 변수 (Vectorized) ---
+    
+    # 1. 이론적 냉각 부하량 (Q) 
+    # overhead_factor=1.0을 가정. 필요시 * overhead_factor 추가
+    df['theoretical_cooling_load'] = df['predicted_it_power_kw'] 
+    
+    # 2. 물리적 성능 계수 (COP)
+    # calculate_cop 내부 구현이 복잡하다면 apply를 사용하고, 단순 수식이면 numpy로 변환하는 것을 권장합니다.
+    df['theoretical_cop'] = df['outdoor_temp_c'].apply(calculate_cop)
+    
+    # 3. 프리쿨링 효율 (free_cooling.py의 calculate_free_cooling_efficiency 로직 벡터화)
+    # 조건: T < 15 (1.0), 15 <= T < 22 (선형 감소), T >= 22 (0.0)
+    temp_eff = np.where(
+        df['outdoor_temp_c'] < FREE_COOLING_THRESHOLD_C, 1.0,
+        np.where(df['outdoor_temp_c'] < 22.0, # HYBRID_THRESHOLD_C가 22.0이라고 가정
+                 1.0 - (df['outdoor_temp_c'] - FREE_COOLING_THRESHOLD_C) / (22.0 - FREE_COOLING_THRESHOLD_C), 
+                 0.0)
+    )
+    
+    hum_factor = 1.0 - ((df['outdoor_humidity'] - 50.0) / 500.0).clip(lower=0.0)
+    margin_factor = (1.0 + (18.0 - df['outdoor_temp_c']) * 0.02).clip(lower=0.8, upper=1.0)
+    
+    df['free_cooling_efficiency'] = (temp_eff * hum_factor * margin_factor).clip(lower=0.0, upper=1.0)
+    # ------------------------------------------------
     
     df['it_power_kw_lag_1'] = df[IT_TARGET_COL].shift(1)
     df['it_power_kw_lag_2'] = df[IT_TARGET_COL].shift(2)   # 누락되어 있던 lag 추가
