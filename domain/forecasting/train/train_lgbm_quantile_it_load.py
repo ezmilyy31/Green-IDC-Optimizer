@@ -49,6 +49,11 @@ selected_features = [
     "temp_above_15c", 
     "temp_below_15c", 
     "humidity_temp_index",
+    # --- 새로 추가된 열역학 피처 ---
+    "theoretical_cooling_load",
+    "theoretical_cop",
+    "free_cooling_efficiency",
+    # -----------------------------
     "it_power_kw_lag_1", 
     "it_power_kw_lag_2", 
     "it_power_kw_lag_12",
