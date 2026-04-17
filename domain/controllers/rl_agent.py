@@ -1,12 +1,11 @@
-"""PPO 학습 스크립트 — Sinergym datacenter-mixed-continuous-stochastic-v1 환경.
+"""PPO 학습 스크립트 — Sinergym datacenter_dx-mixed-continuous-stochastic-v1 환경.
 
 사용법:
-    python -m domain.controllers.rl_agent --total-timesteps 50000 --run-name baseline
-    python -m domain.controllers.rl_agent --lr 1e-4 --n-steps 1024 --run-name exp-02
+    python -m domain.controllers.rl_agent --total-timesteps 500000 --run-name exp-01
+    python -m domain.controllers.rl_agent --lr 1e-4 --w-energy 0.3 --run-name exp-w03
 """
 
 import argparse
-import os
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +17,6 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from domain.controllers.rl_env import DataCenterRLEnv
 
 
-LOG_DIR = Path("data/models/ppo_logs")
 MODEL_DIR = Path("data/models")
 
 
@@ -44,7 +42,7 @@ def train(
 
     Args:
         lr: learning rate
-        n_steps: rollout buffer 길이 (한 번 수집할 step 수)
+        n_steps: rollout buffer 길이
         batch_size: 미니배치 크기
         gamma: discount factor
         total_timesteps: 총 학습 step 수
@@ -57,31 +55,23 @@ def train(
     Returns:
         저장된 모델 경로
     """
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     env = make_env(max_episode_steps, w_energy)
 
-    # 체크포인트 콜백: 10k step마다 저장
     checkpoint_cb = CheckpointCallback(
-        save_freq=max(10_000, n_steps),
+        save_freq=50_000,
         save_path=str(MODEL_DIR / "checkpoints" / run_name),
         name_prefix="ppo",
     )
 
     if resume:
         print(f"[rl_agent] 모델 이어서 학습: {resume}")
-        # VecNormalize 통계 복원
         stats_path = str(resume).replace(".zip", "") + "_vecnorm.pkl"
         if Path(stats_path).exists():
             env = VecNormalize.load(stats_path, env)
             print(f"[rl_agent] VecNormalize 통계 복원: {stats_path}")
-        model = PPO.load(
-            resume,
-            env=env,
-            device=device,
-            learning_rate=lr,
-        )
+        model = PPO.load(resume, env=env, device=device, learning_rate=lr)
     else:
         model = PPO(
             "MlpPolicy",
@@ -100,19 +90,14 @@ def train(
     print(f"[rl_agent] 학습 시작: {run_name}")
     print(f"  lr={lr}, n_steps={n_steps}, batch_size={batch_size}")
     print(f"  gamma={gamma}, total_timesteps={total_timesteps}")
-    print(f"  max_episode_steps={max_episode_steps}, device={device}")
+    print(f"  max_episode_steps={max_episode_steps}, w_energy={w_energy}, device={device}")
 
-    model.learn(
-        total_timesteps=total_timesteps,
-        callback=checkpoint_cb,
-        tb_log_name=run_name,
-    )
+    model.learn(total_timesteps=total_timesteps, callback=checkpoint_cb)
 
     save_path = MODEL_DIR / run_name
     model.save(str(save_path))
     print(f"[rl_agent] 모델 저장 완료: {save_path}.zip")
 
-    # VecNormalize 통계 저장 (추론 시 동일 정규화 적용에 필요)
     vecnorm_path = str(save_path) + "_vecnorm.pkl"
     env.save(vecnorm_path)
     print(f"[rl_agent] VecNormalize 통계 저장 완료: {vecnorm_path}")
@@ -133,14 +118,13 @@ def load_and_predict(model_path: str, observation: np.ndarray) -> np.ndarray:
     """
     model = PPO.load(model_path)
 
-    # VecNormalize 통계가 있으면 obs를 동일하게 정규화
     stats_path = str(model_path).replace(".zip", "") + "_vecnorm.pkl"
     obs = observation.reshape(1, -1).astype(np.float32)
     if Path(stats_path).exists():
         dummy_env = DummyVecEnv([lambda: DataCenterRLEnv()])
         vec_env = VecNormalize.load(stats_path, dummy_env)
-        vec_env.training = False      # 추론 시 통계 업데이트 중단
-        vec_env.norm_reward = False   # 추론 시 보상 정규화 불필요
+        vec_env.training = False
+        vec_env.norm_reward = False
         obs = vec_env.normalize_obs(obs)
 
     action, _ = model.predict(obs, deterministic=True)
@@ -148,13 +132,11 @@ def load_and_predict(model_path: str, observation: np.ndarray) -> np.ndarray:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="PPO 학습 — Sinergym datacenter_dx 환경"
-    )
+    parser = argparse.ArgumentParser(description="PPO 학습 — Sinergym datacenter_dx 환경")
     parser.add_argument("--lr", type=float, default=3e-4, help="learning rate")
     parser.add_argument("--n-steps", type=int, default=2048, help="rollout steps")
     parser.add_argument("--batch-size", type=int, default=64, help="mini-batch size")
-    parser.add_argument("--gamma", type=float, default=0.99, help="discount factor")
+    parser.add_argument("--gamma", type=float, default=0.9, help="discount factor")
     parser.add_argument("--total-timesteps", type=int, default=50_000, help="총 학습 step")
     parser.add_argument("--max-episode-steps", type=int, default=96, help="에피소드 길이 (96=1일, 15분 간격)")
     parser.add_argument("--w-energy", type=float, default=0.5, help="보상 에너지 항 가중치 (0~1)")

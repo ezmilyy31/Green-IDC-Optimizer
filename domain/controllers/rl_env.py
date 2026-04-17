@@ -33,7 +33,7 @@ class DataCenterRLEnv(gym.Wrapper):
             w_energy: 에너지 항 가중치 (0~1). 높을수록 에너지 절감 중시.
                       온도 항 가중치 = 1 - w_energy
         """
-        env = gym.make(ENV_ID) # Sinergym 환경 생성
+        env = gym.make(ENV_ID)
         super().__init__(env) # gym.Wrapper에 등록
 
         self._max_episode_steps = max_episode_steps
@@ -71,10 +71,14 @@ class DataCenterRLEnv(gym.Wrapper):
         east_penalty = max(0, east_temp - TEMP_UPPER_LIMIT) + max(0, TEMP_LOWER_LIMIT - east_temp)
         west_penalty = max(0, west_temp - TEMP_UPPER_LIMIT) + max(0, TEMP_LOWER_LIMIT - west_temp)
 
-        energy_term  = -0.0001 * hvac_power
-        comfort_term = -(east_penalty + west_penalty)
+        cpu_loading = filtered[7]
+        it_power = cpu_loading * 250_000                            # 최대 IT 전력 250kW (CPU 400 + GPU 20대)
+        pue_overhead = hvac_power / (it_power + 1e-6)
+        energy_term  = -(pue_overhead / 5.0)                        # PUE overhead 5 이하 기준 정규화
+        comfort_term = -((east_penalty + west_penalty) / 9.0)      # 최대 위반 9°C(=27-18) 기준
+        comfort_bonus = 0.1 if (east_penalty == 0 and west_penalty == 0) else 0.0
 
-        reward = self._w_energy * energy_term + (1 - self._w_energy) * comfort_term
+        reward = self._w_energy * energy_term + (1 - self._w_energy) * (comfort_term + comfort_bonus)
 
         # 에피소드 길이 제한 (선택)
         if self._max_episode_steps and self._step_count >= self._max_episode_steps:
