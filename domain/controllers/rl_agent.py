@@ -12,6 +12,8 @@ from pathlib import Path
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from domain.controllers.rl_env import DataCenterRLEnv
 
@@ -20,8 +22,10 @@ LOG_DIR = Path("data/models/ppo_logs")
 MODEL_DIR = Path("data/models")
 
 
-def make_env(max_episode_steps: int = 96, w_energy: float = 0.5):
-    return DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy)
+def make_env(max_episode_steps: int = 96, w_energy: float = 0.5) -> VecNormalize:
+    """env 생성 + Monitor + VecNormalize 래핑."""
+    vec_env = DummyVecEnv([lambda: Monitor(DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))])
+    return VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
 
 def train(
@@ -67,6 +71,11 @@ def train(
 
     if resume:
         print(f"[rl_agent] 모델 이어서 학습: {resume}")
+        # VecNormalize 통계 복원
+        stats_path = str(resume).replace(".zip", "") + "_vecnorm.pkl"
+        if Path(stats_path).exists():
+            env = VecNormalize.load(stats_path, env)
+            print(f"[rl_agent] VecNormalize 통계 복원: {stats_path}")
         model = PPO.load(
             resume,
             env=env,
@@ -103,6 +112,11 @@ def train(
     model.save(str(save_path))
     print(f"[rl_agent] 모델 저장 완료: {save_path}.zip")
 
+    # VecNormalize 통계 저장 (추론 시 동일 정규화 적용에 필요)
+    vecnorm_path = str(save_path) + "_vecnorm.pkl"
+    env.save(vecnorm_path)
+    print(f"[rl_agent] VecNormalize 통계 저장 완료: {vecnorm_path}")
+
     env.close()
     return save_path
 
@@ -118,8 +132,19 @@ def load_and_predict(model_path: str, observation: np.ndarray) -> np.ndarray:
         action: cooling_setpoint 값 [20, 30] 범위
     """
     model = PPO.load(model_path)
-    action, _ = model.predict(observation, deterministic=True)
-    return action
+
+    # VecNormalize 통계가 있으면 obs를 동일하게 정규화
+    stats_path = str(model_path).replace(".zip", "") + "_vecnorm.pkl"
+    obs = observation.reshape(1, -1).astype(np.float32)
+    if Path(stats_path).exists():
+        dummy_env = DummyVecEnv([lambda: DataCenterRLEnv()])
+        vec_env = VecNormalize.load(stats_path, dummy_env)
+        vec_env.training = False      # 추론 시 통계 업데이트 중단
+        vec_env.norm_reward = False   # 추론 시 보상 정규화 불필요
+        obs = vec_env.normalize_obs(obs)
+
+    action, _ = model.predict(obs, deterministic=True)
+    return action.flatten()
 
 
 def parse_args():
