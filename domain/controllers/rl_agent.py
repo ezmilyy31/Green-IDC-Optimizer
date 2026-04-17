@@ -93,7 +93,7 @@ def train(
             n_epochs=10,
             ent_coef=0.0,
             verbose=1,
-            tensorboard_log=str(LOG_DIR),
+            tensorboard_log=None,
             device=device,
         )
 
