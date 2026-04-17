@@ -1,3 +1,10 @@
+"""PPO 학습 스크립트 — Sinergym datacenter_dx-mixed-continuous-stochastic-v1 환경.
+
+사용법:
+    python -m domain.controllers.rl_agent --total-timesteps 500000 --run-name exp-01
+    python -m domain.controllers.rl_agent --lr 1e-4 --w-energy 0.3 --run-name exp-w03
+"""
+
 import argparse
 from pathlib import Path
 
