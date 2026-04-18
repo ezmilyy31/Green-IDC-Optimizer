@@ -10,7 +10,7 @@ import sinergym  # noqa: F401 — 환경 등록용
 
 from core.schemas.rl_interface import FILTERED_OBS_KEYS, OBS_INDEX
 
-ENV_ID = "Eplus-datacenter_dx-mixed-continuous-stochastic-v1"
+ENV_ID = "Eplus-datacenter_dx-mixed-continuous-v1"
 
 # 서버실 온도 제약 (명세서: 18~27°C)
 TEMP_UPPER_LIMIT = 27.0

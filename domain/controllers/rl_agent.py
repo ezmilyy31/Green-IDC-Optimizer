@@ -14,16 +14,25 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-from domain.controllers.rl_env import DataCenterRLEnv
+from domain.controllers.idc_env import IDCEnv
+
+try:
+    from domain.controllers.rl_env import DataCenterRLEnv
+except ImportError:
+    DataCenterRLEnv = None  # type: ignore — sinergym 없는 환경에서는 사용 불가
 
 
 MODEL_DIR = Path("data/models")
 
 
-def make_env(max_episode_steps: int = 96, w_energy: float = 0.5) -> VecNormalize:
+def make_env(max_episode_steps: int = 96, w_energy: float = 0.5, custom_env: bool = False) -> VecNormalize:
     """env 생성 + Monitor + VecNormalize 래핑."""
-    vec_env = DummyVecEnv([lambda: Monitor(DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))])
-    return VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+    if custom_env:
+        env_fn = lambda: Monitor(IDCEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
+    else:
+        env_fn = lambda: Monitor(DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
+    vec_env = DummyVecEnv([env_fn])
+    return VecNormalize(vec_env, norm_obs=True, norm_reward=False, clip_obs=10.0)
 
 
 def train(
@@ -33,6 +42,7 @@ def train(
     gamma: float = 0.9,
     total_timesteps: int = 50_000,
     max_episode_steps: int = 96,
+    custom_env: bool = False,
     w_energy: float = 0.5,
     run_name: str = "ppo-baseline",
     device: str = "auto",
@@ -57,7 +67,7 @@ def train(
     """
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    env = make_env(max_episode_steps, w_energy)
+    env = make_env(max_episode_steps, w_energy, custom_env)
 
     checkpoint_cb = CheckpointCallback(
         save_freq=50_000,
@@ -143,6 +153,7 @@ def parse_args():
     parser.add_argument("--run-name", type=str, default="ppo-baseline", help="실험 이름")
     parser.add_argument("--device", type=str, default="auto", help="auto|cuda|cpu")
     parser.add_argument("--resume", type=str, default=None, help="이어서 학습할 모델 경로")
+    parser.add_argument("--custom-env", action="store_true", help="커스텀 IDC 환경 사용 (Sinergym 대신)")
     return parser.parse_args()
 
 
@@ -159,4 +170,5 @@ if __name__ == "__main__":
         run_name=args.run_name,
         device=args.device,
         resume=args.resume,
+        custom_env=args.custom_env,
     )
