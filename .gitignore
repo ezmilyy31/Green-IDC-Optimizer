@@ -21,8 +21,9 @@ data/models/
 .idea/
 .vscode/
 
-# sinergym
-Eplus-datacenter_dx-mixed-continuous-stochastic-v1-*
+# sinergym 시뮬레이션 출력
+Eplus-*/
+data/eplus-output/
 
 # 강화학습 로그
 logs/
