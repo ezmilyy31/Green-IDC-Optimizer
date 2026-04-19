@@ -56,19 +56,22 @@ def fixed_policy(setpoint):
 
 
 def rl_policy(model_path):
-    from stable_baselines3 import PPO
+    from stable_baselines3 import PPO, SAC
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
     from stable_baselines3.common.monitor import Monitor
-    model = PPO.load(model_path)
     vecnorm_path = model_path.replace(".zip", "_vecnorm.pkl")
-    vec_env = None
-    if Path(vecnorm_path).exists():
+    is_sac = not Path(vecnorm_path).exists()
+    if is_sac:
+        model = SAC.load(model_path)
+        vec_env = None
+    else:
+        model = PPO.load(model_path)
         dummy = DummyVecEnv([lambda: Monitor(IDCEnv())])
         vec_env = VecNormalize.load(vecnorm_path, dummy)
         vec_env.training = False
         vec_env.norm_reward = False
     def policy(obs):
-        o = vec_env.normalize_obs(obs.reshape(1, -1).astype(np.float32)) if vec_env else obs.reshape(1, -1)
+        o = vec_env.normalize_obs(obs.reshape(1, -1).astype(np.float32)) if vec_env else obs.reshape(1, -1).astype(np.float32)
         action, _ = model.predict(o, deterministic=True)
         return action.flatten()
     return policy
@@ -101,7 +104,8 @@ def main():
     print_result("고정 setpoint 24°C", evaluate(env, fixed_policy(24.0), args.episodes))
     print_result("Random", evaluate(env, random_policy, args.episodes))
     if Path(args.model).exists():
-        print_result(f"PPO RL ({Path(args.model).stem})", evaluate(env, rl_policy(args.model), args.episodes))
+        algo_label = "SAC" if not Path(args.model.replace(".zip", "_vecnorm.pkl")).exists() else "PPO"
+        print_result(f"{algo_label} RL ({Path(args.model).stem})", evaluate(env, rl_policy(args.model), args.episodes))
     else:
         print(f"\n⚠ RL 모델 없음: {args.model}")
     print(f"\n{'=' * 50}\n")
