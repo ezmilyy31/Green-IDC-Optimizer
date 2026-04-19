@@ -51,6 +51,21 @@ services:
     working_dir: /app
     command: python3 apps/simulation_service/test_sinergym.py # Sinergym 테스트를 위함.
 
+  rl-service:
+    build:
+      context: .
+      dockerfile: docker/rl.Dockerfile
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: >
+      uv run python -m domain.controllers.rl_agent
+      --custom-env
+      --total-timesteps 300000
+      --run-name exp-default
+    profiles:
+      - rl
+
   dashboard:
     build:
       context: .
