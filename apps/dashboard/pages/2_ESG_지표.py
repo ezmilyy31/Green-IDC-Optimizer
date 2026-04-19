@@ -1,7 +1,7 @@
 """
 ESG 지표
 
-탄소 배출 · 전력 비용 · 물 사용량 · 냉각 방식별 탄소 분석
+탄소 배출 · 전력 비용 · 냉각 방식별 탄소 분석
 """
 
 import sys
@@ -34,13 +34,11 @@ esg = d["esg"]
 # ── ESG 요약 카드 ─────────────────────────────────────────────────────────
 
 st.subheader("요약")
-e1, e2, e3, e4, e5, e6 = st.columns(6)
+e1, e2, e3, e4 = st.columns(4)
 e1.metric("탄소 배출 (일)",  f"{esg['carbon_tco2_day']:.3f} tCO₂")
 e2.metric("탄소 배출 (월)",  f"{esg['carbon_tco2_month']:.1f} tCO₂")
-e3.metric("WUE",             f"{esg['wue']:.2f} L/kWh")
-e4.metric("물 사용량 (일)",  f"{esg['water_l_day']:.0f} L")
-e5.metric("전력 비용 (일)",  f"{esg['cost_krw_day']:.1f} 만원")
-e6.metric("전력 비용 (월)",  f"{esg['cost_krw_day'] * 30:.0f} 만원")
+e3.metric("전력 비용 (일)",  f"{esg['cost_krw_day']:.1f} 만원")
+e4.metric("전력 비용 (월)",  f"{esg['cost_krw_month']:.0f} 만원")
 
 st.divider()
 
