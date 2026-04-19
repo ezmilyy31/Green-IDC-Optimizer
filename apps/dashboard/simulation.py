@@ -124,15 +124,18 @@ def run_simulation(
 def calculate_esg(df: pd.DataFrame) -> dict:
     """시뮬레이션 결과 DataFrame으로 ESG 지표를 계산한다."""
     total_energy_kwh = df["총 전력 (kW)"].sum()
+    it_energy_kwh    = df["IT 전력 (kW)"].sum()
 
     carbon_tco2 = total_energy_kwh * CARBON_FACTOR_TCO2_PER_MWH / 1000
     cost_krw    = total_energy_kwh * ELECTRICITY_COST_KRW_PER_KWH
+    cue         = carbon_tco2 / it_energy_kwh if it_energy_kwh > 0 else 0.0  # kgCO₂/kWh
 
     return {
         "carbon_tco2_day":   round(carbon_tco2, 3),
         "carbon_tco2_month": round(carbon_tco2 * 30, 1),
         "cost_krw_day":      round(cost_krw / 1e6, 2),        # 만원
         "cost_krw_month":    round(cost_krw * 30 / 1e6, 1),   # 만원
+        "cue":               round(cue * 1000, 4),             # tCO₂/kWh → kgCO₂/kWh
     }
 
 
