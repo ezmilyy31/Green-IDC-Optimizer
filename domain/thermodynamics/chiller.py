@@ -23,35 +23,32 @@ class ChillerResult:
     chiller_power_kw: float     # 칠러 전력 소비량 (kW)
     cooling_mode: CoolingMode   # 냉각 모드
 
-def calculate_cop(outdoor_temp_c: float) -> float:
+def calculate_cop(outdoor_temp_c: float, supply_temp_c: float = 20.0) -> float:
     """
-    외기 온도에 따른 칠러 COP(성능계수)를 계산한다.
+    외기 온도와 공급 온도에 따른 칠러 COP(성능계수)를 계산한다.
 
-    공식: COP = max(2.0, 6.0 - 0.1 × (T_outdoor - 15))
+    공식: COP = max(2.0, 6.0 - 0.1 × (T_outdoor - 15) + 0.15 × (T_supply - 20))
 
     물리적 의미:
-      - 외기가 15°C일 때 COP = 6.0 (설계 기준점)
-      - 외기가 1°C 오를 때마다 COP가 0.1씩 감소
-      - COP 최솟값은 2.0 (매우 더운 날에도 이 이하로 떨어지지 않는다고 가정)
-
-    예시:
-      - 외기 5°C  → COP = 7.0 → 전력 1kW로 7kW 냉각 가능
-      - 외기 15°C → COP = 6.0 → 전력 1kW로 6kW 냉각 가능
-      - 외기 35°C → COP = 4.0 → 전력 1kW로 4kW 냉각 가능
-      - 외기 55°C → COP = 2.0 (하한) → 전력 1kW로 2kW 냉각 가능
+      - 외기 15°C, 공급 20°C(설계 기준점): COP = 6.0
+      - 외기 1°C 오를수록 COP 0.1 감소 (열 배출 어려워짐)
+      - 공급 온도 1°C 높일수록 COP 0.15 증가 (냉동 사이클 온도 리프트 감소)
+      - 공급 온도 낮출수록 COP 감소 → PUE 상승 (에너지 페널티)
 
     Args:
         outdoor_temp_c: 외기 온도 (°C)
+        supply_temp_c: CRAH 공급 온도 설정값 (°C), 기본값 20.0 (설계값)
 
     Returns:
         칠러 COP (무차원, 최솟값 2.0)
     """
-    return max(2.0, 6.0 - 0.1 * (outdoor_temp_c - 15.0))
+    return max(2.0, 6.0 - 0.1 * (outdoor_temp_c - 15.0) + 0.15 * (supply_temp_c - 20.0))
 
 
 def calculate_chiller_power_kw(
     cooling_load_kw: float,
     outdoor_temp_c: float,
+    supply_temp_c: float = 20.0,
 ) -> ChillerResult:
     """
     냉각 부하와 외기 온도로 칠러 전력 소비량을 계산한다.
@@ -77,7 +74,7 @@ def calculate_chiller_power_kw(
     if cooling_load_kw < 0:
         raise ValueError(f"냉각 부하는 0 이상이어야 합니다. 입력값: {cooling_load_kw}")
 
-    cop = calculate_cop(outdoor_temp_c)
+    cop = calculate_cop(outdoor_temp_c, supply_temp_c)
 
     if outdoor_temp_c < FREE_COOLING_THRESHOLD_C:
         mode = CoolingMode.FREE_COOLING
