@@ -12,4 +12,4 @@ RUN uv sync --frozen --no-dev --extra control
 
 COPY . /app
 
-CMD ["uv", "run", "python", "-m", "domain.controllers.rl_agent", "--custom-env", "--help"]
+CMD ["uv", "run", "--frozen", "--no-dev", "--extra", "control", "python", "-m", "domain.controllers.rl_agent", "--custom-env", "--help"]

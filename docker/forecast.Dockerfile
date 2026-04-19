@@ -17,4 +17,4 @@ RUN uv sync --frozen --no-dev --extra forecast
 
 COPY . /app
 
-CMD ["uv", "run", "--extra", "forecast", "uvicorn", "apps.forecast_service.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uv", "run", "--frozen", "--no-dev", "--extra", "forecast", "uvicorn", "apps.forecast_service.main:app", "--host", "0.0.0.0", "--port", "8001"]
