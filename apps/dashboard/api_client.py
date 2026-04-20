@@ -183,20 +183,15 @@ def simulate_24h(
     supply_temp_c: float,
     crisis: str | None = None,
 ) -> dict:
-    """POST /simulate/24h — Simulation Service 연동 예정 (api_spec.md §5).
-
-    TODO(Simulation Service): 서비스 구현 후 simulation.py의 run_simulation()을 이 호출로 교체.
-        현재 simulation.py에서 domain.* 직접 import로 처리 중 (명세서 아키텍처 원칙 위반).
-    """
-    # TODO(Simulation Service): /simulate/24h 엔드포인트 스키마 확정 후 payload 수정
+    """POST /api/v1/simulation/24h — Simulation Service 24시간 시뮬레이션."""
     return _post(
-        f"{SIMULATION_URL}/simulate/24h",
+        f"{SIMULATION_URL}/api/v1/simulation/24h",
         {
-            "scenario":       scenario,
-            "num_cpu":        num_cpu,
-            "num_gpu":        num_gpu,
-            "base_util":      base_util,
-            "supply_temp_c":  supply_temp_c,
-            "crisis":         crisis,
+            "scenario_name": scenario,
+            "num_cpu":       num_cpu,
+            "num_gpu":       num_gpu,
+            "base_util":     base_util,
+            "supply_temp_c": supply_temp_c,
+            "crisis":        crisis,
         },
     )

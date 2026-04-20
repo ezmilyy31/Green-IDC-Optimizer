@@ -49,7 +49,7 @@ services:
       - ./data:/app/data
       - .:/app
     working_dir: /app
-    command: python3 apps/simulation_service/test_sinergym.py # Sinergym 테스트를 위함.
+    # command: python3 apps/simulation_service/test_sinergym.py # Sinergym 테스트를 위함.
 
   rl-service:
     build:
@@ -74,6 +74,11 @@ services:
       - "8501:8501"
     env_file:
       - .env
+    environment:
+      - API_GATEWAY_URL=http://api:8000
+      - SIMULATION_SERVICE_URL=http://simulation-service:8003
+      - CONTROL_SERVICE_URL=http://control-service:8002
+      - FORECAST_SERVICE_URL=http://forecast-service:8001
     depends_on:
       - api
     volumes:

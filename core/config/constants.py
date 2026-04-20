@@ -24,12 +24,6 @@ GPU_SERVER_P_MAX_W = 1500.0        # GPU 서버 최대 전력 (W)
 CARBON_FACTOR_TCO2_PER_MWH   = 0.459   # 한국 전력 탄소 배출계수
 # TODO(업데이트 필요): 산업용 전기요금 변경 시 수정 — 현재 120원/kWh (한전 산업용 갑 기준 임시값)
 ELECTRICITY_COST_KRW_PER_KWH = 120.0   # 산업용 전기요금 (원/kWh)
-WUE_BY_MODE = {
-    "chiller":      1.8,
-    # TODO(팀 협의): hybrid WUE 값 미확정 — thermodynamic_model.md에 명시 없음
-    "hybrid":       0.0,
-    "free_cooling": 0.2,
-}
 
 # 위기 시나리오 정의 (명세서 기준)
 CRISIS_CONFIGS: dict = {

@@ -1,11 +1,5 @@
 """시뮬레이션 및 ESG 계산 로직"""
 
-# ⚠️ 명세서 아키텍처 원칙 위반:
-#   서비스 간 직접 함수 호출 금지 원칙에 따라 아래 domain.* 직접 import는
-#   Simulation Service의 `POST /simulate/24h` REST 호출로 교체해야 한다.
-#   Simulation Service (port 8003) FastAPI 서버 구현 완료 후 run_simulation() 함수를
-#   api_client.simulate_24h() 호출로 대체할 것 (api_spec.md §5, §8 참고).
-
 import math
 import random
 import sys
@@ -15,7 +9,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pandas as pd
 
-# TODO(Simulation Service): 아래 domain.* import를 POST /simulate/24h REST 호출로 교체
+from apps.dashboard.api_client import simulate_24h as _api_simulate_24h
+from apps.dashboard.constants import (
+    CARBON_FACTOR_TCO2_PER_MWH,
+    CRISIS_CONFIGS,
+    ELECTRICITY_COST_KRW_PER_KWH,
+    NUM_RACKS,
+    SCENARIO_TEMP_PROFILES,
+    TEMP_WARNING_THRESHOLD_C,
+    WORKLOAD_PROFILE,
+)
+
+# Simulation Service 미기동 시 fallback용 직접 계산 모듈
 from domain.thermodynamics.chiller import calculate_chiller_power_kw
 from domain.thermodynamics.cooling_load import (
     AIR_SPECIFIC_HEAT_KJ_PER_KG_K,
@@ -25,19 +30,28 @@ from domain.thermodynamics.cooling_load import (
 from domain.thermodynamics.it_power import calculate_total_it_power_kw
 from domain.thermodynamics.pue import calculate_pue
 
-from apps.dashboard.constants import (
-    CARBON_FACTOR_TCO2_PER_MWH,
-    CRISIS_CONFIGS,
-    ELECTRICITY_COST_KRW_PER_KWH,
-    NUM_RACKS,
-    SCENARIO_TEMP_PROFILES,
-    TEMP_WARNING_THRESHOLD_C,
-    WUE_BY_MODE,
-    WORKLOAD_PROFILE,
-)
+
+def _hourly_to_df(hourly: list[dict]) -> pd.DataFrame:
+    """API 응답의 hourly 리스트를 대시보드용 DataFrame으로 변환한다."""
+    return pd.DataFrame([
+        {
+            "시간":           f"{r['hour']:02d}:00",
+            "외기온도 (°C)":  r["outdoor_temp_c"],
+            "CPU 사용률 (%)": round(r["cpu_utilization"] * 100, 1),
+            "IT 전력 (kW)":   r["it_power_kw"],
+            "냉각 부하 (kW)": r["cooling_load_kw"],
+            "칠러 전력 (kW)": r["chiller_power_kw"],
+            "총 전력 (kW)":   r["total_power_kw"],
+            "환기 온도 (°C)": r["return_temp_c"],
+            "COP":            r["cop"],
+            "PUE":            r["pue"],
+            "냉각 모드":      r["cooling_mode"],
+        }
+        for r in hourly
+    ])
 
 
-def run_simulation(
+def _run_simulation_local(
     scenario_name: str,
     num_cpu: int,
     num_gpu: int,
@@ -45,13 +59,7 @@ def run_simulation(
     supply_temp_c: float,
     crisis: str | None,
 ) -> pd.DataFrame:
-    """24시간 열역학 시뮬레이션을 실행하고 결과 DataFrame을 반환한다.
-
-    TODO(Simulation Service): 이 함수 전체를 api_client.simulate_24h() 호출로 교체.
-        요청: POST /simulate/24h { scenario, num_cpu, num_gpu, base_util, supply_temp_c, crisis }
-        응답: 시간별 결과 배열 → DataFrame 변환
-        교체 조건: Simulation Service FastAPI 서버 구현 및 /simulate/24h 엔드포인트 완성 후
-    """
+    """Simulation Service 미기동 시 domain 함수로 직접 계산하는 fallback."""
     profile = SCENARIO_TEMP_PROFILES[scenario_name]
     m_air   = calculate_m_air_for_servers(num_cpu + num_gpu)
     cfg     = CRISIS_CONFIGS[crisis]
@@ -92,6 +100,27 @@ def run_simulation(
     return pd.DataFrame(rows)
 
 
+def run_simulation(
+    scenario_name: str,
+    num_cpu: int,
+    num_gpu: int,
+    base_util: float,
+    supply_temp_c: float,
+    crisis: str | None,
+) -> pd.DataFrame:
+    """24시간 열역학 시뮬레이션을 실행하고 결과 DataFrame을 반환한다.
+
+    Simulation Service(port 8003)가 기동 중이면 REST API를 호출하고,
+    응답 실패 시 domain 함수로 직접 계산하는 fallback을 수행한다.
+    """
+    result = _api_simulate_24h(scenario_name, num_cpu, num_gpu, base_util, supply_temp_c, crisis)
+
+    if "error" not in result and "hourly" in result:
+        return _hourly_to_df(result["hourly"])
+
+    return _run_simulation_local(scenario_name, num_cpu, num_gpu, base_util, supply_temp_c, crisis)
+
+
 def calculate_esg(df: pd.DataFrame) -> dict:
     """시뮬레이션 결과 DataFrame으로 ESG 지표를 계산한다."""
     total_energy_kwh = df["총 전력 (kW)"].sum()
@@ -99,19 +128,14 @@ def calculate_esg(df: pd.DataFrame) -> dict:
 
     carbon_tco2 = total_energy_kwh * CARBON_FACTOR_TCO2_PER_MWH / 1000
     cost_krw    = total_energy_kwh * ELECTRICITY_COST_KRW_PER_KWH
-
-    water_l = sum(
-        row["IT 전력 (kW)"] * WUE_BY_MODE.get(row["냉각 모드"], 1.0)
-        for _, row in df.iterrows()
-    )
-    wue = water_l / it_energy_kwh if it_energy_kwh > 0 else 0.0
+    cue         = carbon_tco2 / it_energy_kwh if it_energy_kwh > 0 else 0.0  # kgCO₂/kWh
 
     return {
         "carbon_tco2_day":   round(carbon_tco2, 3),
         "carbon_tco2_month": round(carbon_tco2 * 30, 1),
-        "cost_krw_day":      round(cost_krw / 1e6, 2),   # 만원
-        "wue":               round(wue, 2),
-        "water_l_day":       round(water_l, 0),
+        "cost_krw_day":      round(cost_krw / 1e6, 2),        # 만원
+        "cost_krw_month":    round(cost_krw * 30 / 1e6, 1),   # 만원
+        "cue":               round(cue * 1000, 4),             # tCO₂/kWh → kgCO₂/kWh
     }
 
 
