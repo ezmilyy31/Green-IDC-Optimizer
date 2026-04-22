@@ -24,15 +24,15 @@ FILTERED_OBS_KEYS = list(OBS_INDEX.keys())
 class RLState(BaseModel):
     # Agent가 관측하는 상태
 
-    month: float = Field(..., description="월 (1~12)")
-    hour: float = Field(..., description="시 (0~23)")
+    month: float = Field(..., ge=1, le=12, description="월 (1~12)")
+    hour: float = Field(..., ge=0, le=23, description="시 (0~23)")
     outdoor_temperature: float = Field(..., description="외기 온도 (°C)")
-    outdoor_humidity: float = Field(..., description="외기 습도 (%)")
+    outdoor_humidity: float = Field(..., ge=0.0, le=100.0, description="외기 습도 (%)")
     east_zone_air_temperature: float = Field(..., description="East 서버실 온도 (°C)")
     west_zone_air_temperature: float = Field(..., description="West 서버실 온도 (°C)")
-    cooling_setpoint: float = Field(..., description="냉각 설정 온도 (°C)")
-    cpu_loading_fraction: float = Field(..., description="CPU 부하율 (0~1)")
-    HVAC_electricity_demand_rate: float = Field(..., description="전체 HVAC 전력 (W)")
+    cooling_setpoint: float = Field(..., ge=20.0, le=30.0, description="냉각 설정 온도 (°C)")
+    cpu_loading_fraction: float = Field(..., ge=0.0, le=1.0, description="CPU 부하율 (0~1)")
+    HVAC_electricity_demand_rate: float = Field(..., ge=0.0, description="전체 HVAC 전력 (W)")
 
 # 실험에서 정해지는 action이 하나 
 class RLAction(BaseModel):
