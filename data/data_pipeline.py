@@ -57,33 +57,51 @@ class Cluster:
         print('Last 3 timestamps:', df_sorted['timestamp'].tail(21).tolist())
         self.dff = df
 
-    def extend_to_year(self, target_days=366):
-    #28일 데이터를 1년으로 확장 (반복 + 노이즈 + 계절 트렌드)
-    
+    def extend_to_year(self, target_days=365):
+        # 28일 원본 데이터(2019년 5월)를 1년(2019-01-01 ~ 2019-12-31)으로 확장
+        # 각 chunk의 Seasonal Factor는 출력 달력 월(1월~12월) 기준으로 적용
         chunks = []
-        repeats = target_days // 28 + 1  # 약 13번 반복
-    
+        repeats = target_days // 28 + 1
+        rng = np.random.default_rng()  # 시드 없음 → 매 실행마다 다른 결과
+
         for i in range(repeats):
             chunk = self.dff.copy()
-        
-            # 1) 가우시안 노이즈 추가 (±5~10%)
-            noise = np.random.normal(1.0, 0.05, len(chunk))
+
+            # 1) 청크마다 다른 강도의 가우시안 노이즈
+            chunk_std = rng.uniform(0.03, 0.12)
+            base_noise = rng.normal(0, chunk_std, len(chunk))
+
+            # 단기 자기상관 노이즈: 1시간 이동평균으로 스무딩 → 연속적 변동
+            smooth_noise = np.convolve(
+                rng.normal(0, chunk_std * 0.4, len(chunk)),
+                np.ones(12) / 12,
+                mode='same'
+            )
+            noise = 1.0 + base_noise + smooth_noise
+
+            # 랜덤 부하 스파이크 (30% 확률, 1~5시간 지속)
+            if rng.random() < 0.3:
+                spike_start = rng.integers(0, max(1, len(chunk) - 60))
+                spike_len = rng.integers(12, 60)
+                noise[spike_start:spike_start + spike_len] *= rng.uniform(1.05, 1.15)
+
             chunk['avg_cpu'] = (chunk['avg_cpu'] * noise).clip(0, 1)
             chunk['avg_mem'] = (chunk['avg_mem'] * noise).clip(0, 1)
-            
-            # 2) 계절 트렌드 추가 (여름에 부하 약간 상승)
-            month = (i % 12) + 1  # 1~12월 매핑
-            seasonal_factor = 1.0 + 0.1 * np.sin(2 * np.pi * (month - 1) / 12)
-            # 7월(month=7)에 +10%, 1월(month=1)에 -10%
+
+            # 2) 계절 트렌드: 출력 달력 월 기준 (chunk i=0 → 1월, i=1 → 2월, ...)
+            # sin(2π*(month-4)/12): month=7(7월) → +10%, month=1(1월) → -10%
+            month = (i % 12) + 1
+            seasonal_factor = 1.0 + 0.1 * np.sin(2 * np.pi * (month - 4) / 12)
             chunk['avg_cpu'] = (chunk['avg_cpu'] * seasonal_factor).clip(0, 1)
-            
+
             chunks.append(chunk)
-    
+
         print(len(chunks))
         result = pd.concat(chunks, ignore_index=True)[:target_days * 288]  # 5분 단위
-        # 3) 타임스탬프 재생성
+
+        # 3) 타임스탬프: 2019-01-01 ~ 2019-12-31
         result['timestamp'] = pd.date_range(
-            start='2024-01-01', periods=len(result), freq='5min'
+            start='2019-01-01', periods=len(result), freq='5min'
         )
         print(result.head(3))
         print(result.tail(3))
@@ -107,7 +125,7 @@ class Cluster:
     
     def cl_generate_dataset(self):
         self.read_file()
-        self.extend_to_year(366)
+        self.extend_to_year(365)  # 원본: 2019년 5월, 출력: 2019-01-01 ~ 2019-12-31
         df = self.extract_file()
         #print(df.head(5))
         #print(df.tail(5))
@@ -115,7 +133,7 @@ class Cluster:
 
 
 class Weather:
-    def __init__(self, year=2024, month=12, station_id=101):
+    def __init__(self, year=2019, month=12, station_id=101):
         self.year = year
         self.month = month
         self.station_id = station_id
@@ -254,7 +272,7 @@ class Weather:
 #############
 
 class SyntheticIDCBuilder:
-    def __init__(self, num_servers=500, days=366):
+    def __init__(self, num_servers=500, days=365):
         self.num_servers = num_servers
         self.days = days
         self.time_steps = days * 24 * 12  # 5분 단위
@@ -349,8 +367,8 @@ class SyntheticIDCBuilder:
     def generate_dataset(self):
         """통합 데이터셋 생성"""
         timestamps = pd.date_range(
-            start='2024-01-01', 
-            periods=self.time_steps, 
+            start='2019-01-01',
+            periods=self.time_steps,
             freq='5min'
         )
 
@@ -359,7 +377,7 @@ class SyntheticIDCBuilder:
         P_max = 500.0 #CPU Server Standard
         
         cpu_util = self.load_workload_pattern() #Google Cluster 시간대별 사용량
-        weather_data = self.load_weather_data(2024, 101) #2024년 춘천 (5분 단위로 보간됨)
+        weather_data = self.load_weather_data(2019, 101) #2019년 춘천 (5분 단위로 보간됨)
         weather_data = weather_data.set_index("timestamp").reindex(timestamps).interpolate(method="linear").reset_index()
 
         data = {
@@ -411,8 +429,10 @@ class SyntheticIDCBuilder:
         df[['free_cooling_available', 'free_cooling_efficiency', 'fan_power_kw', 'effective_cooling_kw']] = df.apply(calc_fc, axis=1)
 
         # 6. PUE: pue + total_power_kw
+        # cooling_power = chiller + fan (Free Cooling 시 chiller=0, fan만 존재)
         def calc_pue(row):
-            result = self.calculate_pue_for_data(row['it_power_kw'], row['chiller_power_kw'])
+            cooling_power_kw = row['chiller_power_kw'] + row['fan_power_kw']
+            result = self.calculate_pue_for_data(row['it_power_kw'], cooling_power_kw)
             return pd.Series({
                 'pue': result.pue,
                 'total_power_kw': result.total_power_kw,
@@ -423,7 +443,7 @@ class SyntheticIDCBuilder:
         return df
 
 # 사용 예시
-builder = SyntheticIDCBuilder(num_servers=500, days=366)
+builder = SyntheticIDCBuilder(num_servers=500, days=365)
 dataset = builder.generate_dataset()
 print(dataset.head())
 print(dataset.tail())
