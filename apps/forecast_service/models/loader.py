@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from domain.forecasting.lgbm_model import LGBMForecaster
+from domain.forecasting.moving_avg import MovingAverageForecaster
 
 """
 Forecast Service model loader.
@@ -39,6 +40,12 @@ def _load_json_if_exists(
 
     with file_path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _load_moving_avg_if_exists(file_path: Path) -> MovingAverageForecaster | None:
+    if not file_path.exists():
+        return None
+    return MovingAverageForecaster.load(file_path)
 
 
 def _load_lgbm_if_exists(file_path: Path) -> LGBMForecaster | None:
@@ -82,6 +89,7 @@ def load_model_bundle() -> dict[str, Any]:
         "model_dir": str(model_dir),
         "models": {
             "it_load": {
+                "moving_avg": _load_moving_avg_if_exists(model_dir / "it_load_moving_avg.joblib"),
                 "lgbm": _load_lgbm_if_exists(model_dir / "it_load_lgbm.joblib"),
                 "lgbm_quantile": {
                     "lower": _load_lgbm_if_exists(model_dir / "lgbm_quantile_it_load_lower.pkl"),
@@ -91,6 +99,7 @@ def load_model_bundle() -> dict[str, Any]:
                 "lstm": _try_load_lstm_if_exists(model_dir / "it_load_lstm.pt"),
             },
             "cooling_demand": {
+                "moving_avg": _load_moving_avg_if_exists(model_dir / "cooling_demand_moving_avg.joblib"),
                 "lgbm": _load_lgbm_if_exists(model_dir / "cooling_demand_lgbm.joblib"),
                 "lgbm_quantile": {
                     "lower": _load_lgbm_if_exists(model_dir / "lgbm_quantile_cooling_demand_lower.pkl"),

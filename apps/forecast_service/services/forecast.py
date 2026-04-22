@@ -405,12 +405,14 @@ def _select_model(
     
     if model_type == ModelType.LGBM:
         quantile_bundle = models_for_target.get("lgbm_quantile")
-        if quantile_bundle and include_interval: 
-            return quantile_bundle  # {'lower': model, 'point': model, 'upper': model} 통째로 반환 
+        if quantile_bundle and include_interval:
+            return quantile_bundle
         elif quantile_bundle and not include_interval:
-            return quantile_bundle.get("point") # interval 안 쓰면 중심 예측(50%) 모델만 반환
+            return quantile_bundle.get("point")
         else:
             return models_for_target.get("lgbm")
+    elif model_type == ModelType.MOVING_AVG:
+        return models_for_target.get("moving_avg")
     else:
         return models_for_target.get(model_type.value)
 
