@@ -15,6 +15,7 @@ class PredictionTarget(str, Enum):
     BOTH = "both"
 
 # 예측에 사용할 model 선택지
-class ModelType(str, Enum): 
+class ModelType(str, Enum):
     LGBM = "lgbm"
     LSTM = "lstm"
+    MOVING_AVG = "moving_avg"
