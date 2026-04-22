@@ -1,11 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from core.config.enums import CoolingMode
 
 class ControlRequest(BaseModel):
-    outdoor_temp_c: float           # 외기 온도 (°C), 냉각 모드 결정
-    outdoor_humidity: float = 50.0  # 외기 습도 (%), free cooling 효율 보정
-    it_power_kw: float              # 현재 IT 전력 (kW), 냉각 부하 계산
+    outdoor_temp_c: float                              # 외기 온도 (°C), 냉각 모드 결정
+    outdoor_humidity: float = Field(default=50.0, ge=0.0, le=100.0)  # 외기 습도 (%), free cooling 효율 보정
+    it_power_kw: float = Field(..., gt=0.0)            # 현재 IT 전력 (kW), 냉각 부하 계산
     timestamp: datetime | None = None  # 시각, RL에서 time_of_day 특성
     # PID 연동 시 추가
     # server_inlet_temp_c: float     서버 입구 온도, PID가 현재 온도로 받아야 하는 값
