@@ -16,7 +16,7 @@ uv run python -m domain.forecasting.train.train_lgbm_cooling_demand
 # =========================================================
 # 1. 데이터 로드 및 Feature Engineering
 # =========================================================
-data_path = "data/processed/synthetic_idc_1year.parquet"
+data_path = "data/processed/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "chiller_power_kw" 
 
 if not Path(data_path).exists():
@@ -58,36 +58,90 @@ selected_features = [
 ]
 
 # =========================================================
-# 3. 시계열 분리 및 모델 평가 (Validation)
+# 3. 1~12월 월별 시계열 분리 및 모델 평가 (Validation)
 # =========================================================
-test_size = 288 * 14
-train_df = processed_df.iloc[:-test_size]
-test_df = processed_df.iloc[-test_size:]
+print("\n[진행] 1월 ~ 12월 월별 교차 검증을 시작합니다. (시간이 다소 소요될 수 있습니다...)")
 
-print(f"데이터 분리 완료:")
-print(f" - Train: {train_df.shape[0]} rows (학습 및 검증용)")
-print(f" - Test:  {test_df.shape[0]} rows (평가용)")
+monthly_results = []
 
-eval_model = LGBMForecaster(
-    target_name=TARGET_COL,
-    feature_columns=selected_features
-)
-eval_model.fit(train_df=train_df)
+for month in range(1, 13):
+    # 1. 월별 데이터 분리 (해당 월은 Test, 나머지 11개월은 Train)
+    month_mask = (processed_df['timestamp'].dt.month == month)
+    test_df = processed_df[month_mask]
+    train_df = processed_df[~month_mask]
 
-X_test = test_df.drop(columns=[TARGET_COL]) 
-y_test = test_df[TARGET_COL].values         
+    if test_df.empty:
+        continue
 
-pred_df = eval_model.predict_frame(X_test, timestamp_col="timestamp")
-y_pred = pred_df[f"predicted_{TARGET_COL}"].values
+    print(f"\n[{month}월 평가] Train: {train_df.shape[0]} rows / Test: {test_df.shape[0]} rows")
 
-mae = mean_absolute_error(y_test, y_pred)
-rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-mape = np.mean(np.abs((y_test - y_pred) / (y_test + 1e-8))) * 100
+    # 2. 모델 초기화 및 학습
+    eval_model = LGBMForecaster(
+        target_name=TARGET_COL,
+        feature_columns=selected_features
+    )
+    eval_model.fit(train_df=train_df)
 
-print("\n=== 냉방 수요 모델 평가 결과 (Test Data) ===")
-print(f"MAE  (평균 절대 오차): {mae:.2f} kW")
-print(f"RMSE (평균 제곱근 오차): {rmse:.2f} kW")
-print(f"MAPE (평균 오차율):    {mape:.2f} %")
+    # 3. Test 데이터로 예측
+    X_test = test_df.drop(columns=[TARGET_COL]) 
+    y_test = test_df[TARGET_COL].values         
+
+    pred_df = eval_model.predict_frame(X_test, timestamp_col="timestamp")
+    y_pred = pred_df[f"predicted_{TARGET_COL}"].values
+
+    # 4. 평가 지표 계산
+    mae = mean_absolute_error(y_test, y_pred)
+    mean_actual = float(np.mean(y_test))
+    
+    # nMAE 계산
+    nmae = (mae / mean_actual * 100) if mean_actual > 0 else 0.0
+
+    # 비영 구간 MAPE 계산
+    nonzero_mask = y_test > 1.0  # 1kW 이상만 실질적 사용으로 간주
+    if nonzero_mask.sum() > 0:
+        mape_nonzero = np.mean(np.abs((y_test[nonzero_mask] - y_pred[nonzero_mask]) / y_test[nonzero_mask])) * 100
+    else:
+        mape_nonzero = 0.0
+
+    # 결과 임시 저장
+    monthly_results.append((month, mae, nmae, mape_nonzero, y_test))
+    print(f"  > 완료! nMAE: {nmae:.2f} %")
+
+
+# =========================================================
+# 3-1. 1~12월 모델 평가 비교 요약 출력 
+# =========================================================
+print("\n=== 1~12월 모델 평가 비교 요약 (LGBM Forecaster) ===")
+print(f"{'월 (Month)':<7} {'MAE':>10} {'nMAE (전체)':>18} {'MAPE (비영)':>15} {'칠러 미가동률':>15}")
+print("-" * 80)
+
+total_mae = []
+valid_nmae_list = [] # 프리쿨링이 아닌 달의 nMAE만 모아서 연간 평균을 내기 위함
+
+for month, mae, nmae, mape_nonzero, y_test in monthly_results:  
+    total_mae.append(mae)
+    
+    # 칠러가 사실상 가동되지 않은(1.0kW 미만) 시간의 비율 계산
+    free_cooling_ratio = (y_test < 1.0).mean()
+    
+    # 해당 월의 90% 이상 시간 동안 칠러가 꺼져 있었다면 프리쿨링 달로 처리
+    if free_cooling_ratio >= 0.90:
+        nmae_str = "(free cooling)"
+        mape_str = "- "
+    else:
+        nmae_str = f"{nmae:.2f} %"
+        mape_str = f"{mape_nonzero:.2f} %"
+        valid_nmae_list.append(nmae)
+    
+    print(f"{month:02d}월{' ':<8} {mae:>7.2f} kW {nmae_str:>18} {mape_str:>15}  {free_cooling_ratio:>15.1%}")
+
+print("-" * 80)
+print(f"연간 평균 MAE : {np.mean(total_mae):.2f} kW")
+
+if valid_nmae_list:
+    print(f"유효 nMAE 평균 : {np.mean(valid_nmae_list):.2f} % (프리쿨링 월 제외)")
+print()
+
 
 # =========================================================
 # 4. 실서비스 투입용 전체 데이터 재학습 (Retrain) 및 저장
@@ -108,3 +162,26 @@ prod_model.save(str(model_path))
 
 print(f"\n최종 배포용 모델 저장 완료: {model_path}")
 print("학습에 사용된 Feature 목록:", prod_model.feature_columns)
+
+
+# =========================================================
+# 5. [추가 검증] 피처 중요도 (Feature Importance) 출력
+# =========================================================
+print("\n=== 모델 피처 중요도 ===")
+
+# 사용하는 LGBMForecaster 내부 구조에 따라 모델 객체 접근 (보통 .model 에 저장됨)
+try:
+    importances = prod_model.model.feature_importances_
+    features = prod_model.feature_columns
+    
+    importance_df = pd.DataFrame({
+        'Feature': features,
+        'Importance': importances
+    }).sort_values(by='Importance', ascending=False)
+    
+    # 중요도를 비율(%)로 변환
+    importance_df['Importance(%)'] = (importance_df['Importance'] / importance_df['Importance'].sum()) * 100
+    
+    print(importance_df.head(10).to_string(index=False))
+except Exception as e:
+    print(f"피처 중요도 추출 실패: {e}")
