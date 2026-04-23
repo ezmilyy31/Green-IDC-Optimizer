@@ -21,7 +21,7 @@ uv run python -m domain.forecasting.train.train_lgbm_it_load
 # 1. 데이터 로드 및 Feature Engineering
 # =========================================================
 
-data_path = "data/processed/synthetic_idc_1year.parquet"
+data_path = "data/processed/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "it_power_kw" 
 
 if not Path(data_path).exists():
@@ -33,10 +33,6 @@ print(f"원본 데이터 로드 완료: {raw_df.shape}")
 # builder.py의 로직을 통해 파생 변수가 일괄 추가 및 결측치 제거
 processed_df = build_train_features(raw_df, target_col=TARGET_COL)
 print(f"파생 변수 생성 완료 (결측치 제거 후): {processed_df.shape}")
-
-# 데이터 확인 (선택 사항)
-print(f"데이터 로드 완료: {processed_df.shape}")
-print(processed_df.head())
 
 
 # =========================================================
@@ -68,42 +64,68 @@ selected_features = [
     "it_power_x_humidity"
 ]
 
+
 # =========================================================
-# 3. 시계열 분리 및 모델 평가 (Validation)
+# 3. 1~12월 월별 시계열 분리 및 모델 평가 (Validation)
 # =========================================================
+print("\n[진행] 1월 ~ 12월 월별 교차 검증을 시작합니다. (시간이 다소 소요됩니다...)")
 
-# 테스트 데이터 분리 (마지막 2주를 테스트용으로 사용)
-# 5분 단위 데이터 -> 1시간=12개, 하루=288개, 14일=4032개
-test_size = 288 * 14
-train_df = processed_df.iloc[:-test_size]
-test_df = processed_df.iloc[-test_size:]
+monthly_results = []
 
-print(f"\n데이터 분리 완료:")
-print(f" - Train: {train_df.shape[0]} rows (학습용)")
-print(f" - Test:  {test_df.shape[0]} rows (평가용)")
+for month in range(1, 13):
+    # 1. 월별 데이터 분리
+    month_mask = (processed_df['timestamp'].dt.month == month)
+    test_df = processed_df[month_mask]
+    train_df = processed_df[~month_mask]
 
-# 모델 초기화 및 Train 데이터로만 1차 학습
-eval_model = LGBMForecaster(
-    target_name=TARGET_COL,
-    feature_columns=selected_features
-)
-eval_model.fit(train_df=train_df)
+    if test_df.empty:
+        continue
 
-# Test 데이터로 예측 (정답 가리기)
-X_test = test_df.drop(columns=[TARGET_COL]) # 정답 가리기
-y_test = test_df[TARGET_COL].values         # 실제 정답 추출
-pred_df = eval_model.predict_frame(X_test, timestamp_col="timestamp")
-y_pred = pred_df[f"predicted_{TARGET_COL}"].values
+    print(f"\n[{month:02d}월 평가] Train: {train_df.shape[0]} rows / Test: {test_df.shape[0]} rows")
 
-# 평가 지표 계산
-mae = mean_absolute_error(y_test, y_pred)
-rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-mape = np.mean(np.abs((y_test - y_pred) / (y_test + 1e-8))) * 100
+    # 2. 모델 학습
+    eval_model = LGBMForecaster(target_name=TARGET_COL, feature_columns=selected_features)
+    eval_model.fit(train_df=train_df)
 
-print("\n=== 모델 평가 결과 (Test Data) ===")
-print(f"MAE  (평균 절대 오차): {mae:.2f} kW")
-print(f"RMSE (평균 제곱근 오차): {rmse:.2f} kW")
-print(f"MAPE (평균 오차율):    {mape:.2f} %")
+    # 3. Test 데이터 예측
+    X_test = test_df.drop(columns=[TARGET_COL])
+    y_test = test_df[TARGET_COL].values
+    
+    pred_df = eval_model.predict_frame(X_test, timestamp_col="timestamp")
+    y_pred = pred_df[f"predicted_{TARGET_COL}"].values
+
+    # 4. 평가 지표 계산
+    mae = mean_absolute_error(y_test, y_pred)
+    mape_all = float(np.mean(np.abs((y_test - y_pred) / (y_test + 1e-8))) * 100)
+    
+    mape_24h = float(np.mean(np.abs((y_test[:288] - y_pred[:288]) / (y_test[:288] + 1e-8))) * 100)
+    end_168h = min(2016, len(y_test))
+    mape_168h = float(np.mean(np.abs((y_test[:end_168h] - y_pred[:end_168h]) / (y_test[:end_168h] + 1e-8))) * 100)
+
+    monthly_results.append((month, mae, mape_all, mape_24h, mape_168h))
+    print(f"  > 완료! MAPE(24h): {mape_24h:.2f} %")
+
+
+# =========================================================
+# 3-1. 1~12월 모델 평가 비교 요약 출력
+# =========================================================
+print("\n=== 1~12월 모델 평가 비교 요약 (LGBM Point Forecaster) ===")
+print(f"{'월 (Month)':<10} {'MAE':>10} {'MAPE (전체)':>15} {'MAPE (24h)':>15} {'MAPE (168h)':>15}")
+print("-" * 73)
+
+total_mae, total_mape_24h, total_mape_168h = [], [], []
+
+for month, mae, mape_all, mape_24h, mape_168h in monthly_results:
+    total_mae.append(mae)
+    total_mape_24h.append(mape_24h)
+    total_mape_168h.append(mape_168h)
+    print(f"{month:02d}월{' ':<8} {mae:>7.2f} kW {mape_all:>13.2f} % {mape_24h:>13.2f} % {mape_168h:>13.2f} %")
+
+print("-" * 73)
+print(f"연간 평균 MAE       : {np.mean(total_mae):.2f} kW")
+print(f"연간 평균 MAPE(24h) : {np.mean(total_mape_24h):.2f} %  (요구사항: 5% 이내)")
+print(f"연간 평균 MAPE(168h): {np.mean(total_mape_168h):.2f} %  (요구사항: 8% 이내)\n")
+
 
 # =========================================================
 # 4. 실서비스 투입용 전체 데이터 재학습 (Retrain) 및 저장
