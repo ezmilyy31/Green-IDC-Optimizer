@@ -21,7 +21,7 @@ uv run python -m domain.forecasting.train.train_lgbm_quantile_it_load
 # 1. 데이터 로드 및 Feature Engineering
 # =========================================================
 
-data_path = "data/processed/synthetic_idc_1year.parquet"
+data_path = "data/processed/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "it_power_kw" 
 
 if not Path(data_path).exists():
@@ -63,72 +63,76 @@ selected_features = [
     "it_power_x_humidity"
 ]
 
+
 # =========================================================
-# 3. 시계열 분리 및 모델 평가 (Validation)
+# 3. 1~12월 시계열 분리 및 모델 평가 (Validation)
 # =========================================================
+print("\n[진행] 1월 ~ 12월 월별 교차 검증을 시작합니다.")
+print("       (Quantile 모델 3개 x 12개월 = 총 36회 학습이 진행되므로 시간이 소요됩니다...)")
 
-# 테스트 데이터 분리 (마지막 2주를 테스트용으로 사용)
-test_size = 288 * 14
-train_df = processed_df.iloc[:-test_size]
-test_df = processed_df.iloc[-test_size:]
+monthly_results = []
 
-print(f"\n데이터 분리 완료:")
-print(f" - Train: {train_df.shape[0]} rows (학습용)")
-print(f" - Test:  {test_df.shape[0]} rows (평가용)")
+for month in range(1, 13):
+    month_mask = (processed_df['timestamp'].dt.month == month)
+    test_df = processed_df[month_mask]
+    train_df = processed_df[~month_mask]
 
-# --- 평가용 모델 초기화 및 학습 ---
-print("\n[진행] 평가용 Quantile 모델 3개 학습 시작...")
+    if test_df.empty:
+        continue
 
-# 1. Lower Bound (5%)
-eval_model_lower = LGBMForecaster(
-    target_name=TARGET_COL,
-    feature_columns=selected_features,
-    params={'objective': 'quantile', 'alpha': 0.05, 'n_estimators': 200}
-)
-eval_model_lower.fit(train_df=train_df)
+    print(f"\n[{month:02d}월 평가] Train: {train_df.shape[0]} rows / Test: {test_df.shape[0]} rows")
 
-# 2. Point Prediction (50%)
-eval_model_point = LGBMForecaster(
-    target_name=TARGET_COL,
-    feature_columns=selected_features,
-    params={'objective': 'quantile', 'alpha': 0.50, 'n_estimators': 200}
-)
-eval_model_point.fit(train_df=train_df)
+    # 모델 3개 학습
+    eval_model_lower = LGBMForecaster(target_name=TARGET_COL, feature_columns=selected_features, params={'objective': 'quantile', 'alpha': 0.05, 'n_estimators': 200})
+    eval_model_point = LGBMForecaster(target_name=TARGET_COL, feature_columns=selected_features, params={'objective': 'quantile', 'alpha': 0.50, 'n_estimators': 200})
+    eval_model_upper = LGBMForecaster(target_name=TARGET_COL, feature_columns=selected_features, params={'objective': 'quantile', 'alpha': 0.95, 'n_estimators': 200})
+    
+    eval_model_lower.fit(train_df=train_df)
+    eval_model_point.fit(train_df=train_df)
+    eval_model_upper.fit(train_df=train_df)
 
-# 3. Upper Bound (95%)
-eval_model_upper = LGBMForecaster(
-    target_name=TARGET_COL,
-    feature_columns=selected_features,
-    params={'objective': 'quantile', 'alpha': 0.95, 'n_estimators': 200}
-)
-eval_model_upper.fit(train_df=train_df)
+    # 예측
+    X_test = test_df.drop(columns=[TARGET_COL])
+    y_test = test_df[TARGET_COL].values
 
-# --- Test 데이터로 예측 (정답 가리기) ---
-X_test = test_df.drop(columns=[TARGET_COL])
-y_test = test_df[TARGET_COL].values
+    y_pred_lower = eval_model_lower.predict_frame(X_test, timestamp_col="timestamp")[f"predicted_{TARGET_COL}"].values
+    y_pred_point = eval_model_point.predict_frame(X_test, timestamp_col="timestamp")[f"predicted_{TARGET_COL}"].values
+    y_pred_upper = eval_model_upper.predict_frame(X_test, timestamp_col="timestamp")[f"predicted_{TARGET_COL}"].values
 
-y_pred_lower = eval_model_lower.predict_frame(X_test, timestamp_col="timestamp")[f"predicted_{TARGET_COL}"].values
-y_pred_point = eval_model_point.predict_frame(X_test, timestamp_col="timestamp")[f"predicted_{TARGET_COL}"].values
-y_pred_upper = eval_model_upper.predict_frame(X_test, timestamp_col="timestamp")[f"predicted_{TARGET_COL}"].values
+    # Point 지표 (50%)
+    mae_p = mean_absolute_error(y_test, y_pred_point)
+    mape_24h = float(np.mean(np.abs((y_test[:288] - y_pred_point[:288]) / (y_test[:288] + 1e-8))) * 100)
+    end_168h = min(2016, len(y_test))
+    mape_168h = float(np.mean(np.abs((y_test[:end_168h] - y_pred_point[:end_168h]) / (y_test[:end_168h] + 1e-8))) * 100)
 
-# --- 평가 지표 계산 ---
-# Point 예측(50%)에 대한 기본 오차율 계산
-mae = mean_absolute_error(y_test, y_pred_point)
-rmse = np.sqrt(mean_squared_error(y_test, y_pred_point))
-mape = np.mean(np.abs((y_test - y_pred_point) / (y_test + 1e-8))) * 100
+    # Interval 지표
+    is_covered = (y_test >= y_pred_lower) & (y_test <= y_pred_upper)
+    coverage_rate = np.mean(is_covered) * 100
+    mean_interval_width = np.mean(y_pred_upper - y_pred_lower)
 
-# 구간 예측(Interval)의 핵심 지표: Coverage 계산 (목표: 85% 이상)
-is_covered = (y_test >= y_pred_lower) & (y_test <= y_pred_upper)
-coverage_rate = np.mean(is_covered) * 100
-mean_interval_width = np.mean(y_pred_upper - y_pred_lower)
+    monthly_results.append((month, mae_p, mape_24h, mape_168h, coverage_rate, mean_interval_width))
+    print(f"  > 완료! Point MAPE(24h): {mape_24h:.2f}%, Coverage: {coverage_rate:.2f}%")
 
-print("\n=== 모델 평가 결과 (Test Data) ===")
-print(f"Point MAE  (평균 절대 오차): {mae:.2f} kW")
-print(f"Point RMSE (평균 제곱근 오차): {rmse:.2f} kW")
-print(f"Point MAPE (평균 오차율):    {mape:.2f} %")
-print("-" * 35)
-print(f"Interval Coverage (포함 비율): {coverage_rate:.2f} % (목표: 85% 이상)")
-print(f"Interval Mean Width (평균 폭): {mean_interval_width:.2f} kW")
+# =========================================================
+# 3-1. 1~12월 모델 평가 비교 요약 출력
+# =========================================================
+print("\n=== 1~12월 모델 평가 비교 요약 (LGBM Quantile Bundle) ===")
+print(f"{'월 (Month)':<7} {'Point MAE':>10} {'MAPE (24h)':>15} {'MAPE (168h)':>15} {'Coverage':>12} {'Mean Width':>12}")
+print("-" * 80)
+
+total_mae, total_mape_24h, total_coverage = [], [], []
+
+for month, mae, mape_24h, mape_168h, cov, width in monthly_results:
+    total_mae.append(mae)
+    total_mape_24h.append(mape_24h)
+    total_coverage.append(cov)
+    print(f"{month:02d}월{' ':<6} {mae:>7.2f} kW {mape_24h:>13.2f} % {mape_168h:>13.2f} % {cov:>10.2f} % {width:>9.2f} kW")
+
+print("-" * 80)
+print(f"연간 평균 Point MAE : {np.mean(total_mae):.2f} kW")
+print(f"연간 평균 MAPE(24h) : {np.mean(total_mape_24h):.2f} %")
+print(f"연간 평균 Coverage  : {np.mean(total_coverage):.2f} %  (목표: 85% 이상)\n")
+
 
 # =========================================================
 # 4. 실서비스 투입용 전체 데이터 재학습 (Retrain) 및 저장
