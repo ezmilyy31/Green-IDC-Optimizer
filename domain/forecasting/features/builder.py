@@ -276,9 +276,6 @@ def _build_next_feature_row(
 
     return feature_df[["timestamp", *feature_columns]]
 
-# =========================================================
-# 3. [학습용] 전체 데이터프레임 벡터화 연산 (Offline Feature Engineering)
-# =========================================================
 
 # =========================================================
 # 3. [학습용] 전체 데이터프레임 벡터화 연산 (Offline Feature Engineering)
@@ -314,24 +311,21 @@ def build_train_features(df: pd.DataFrame, target_col: str = IT_TARGET_COL) -> p
     df['free_cooling_available'] = (df['outdoor_temp_c'] <= FREE_COOLING_THRESHOLD_C).astype(int)
     df['humidity_temp_index'] = df['outdoor_temp_c'] * df['outdoor_humidity']
 
-    # 3. IT 부하 관련 변수 (★ 냉방 수요 예측의 핵심 피처)
-    df['predicted_it_power_kw'] = df[IT_TARGET_COL] 
+    # 3. IT 부하 관련 변수 (냉방 수요 예측의 핵심)
+    df['predicted_it_power_kw'] = df[IT_TARGET_COL].shift(1)
 
     # --- 열역학 기반 파생 변수 (Vectorized) ---
     
     # 1. 이론적 냉각 부하량 (Q) 
-    # overhead_factor=1.0을 가정. 필요시 * overhead_factor 추가
     df['theoretical_cooling_load'] = df['predicted_it_power_kw'] 
     
     # 2. 물리적 성능 계수 (COP)
-    # calculate_cop 내부 구현이 복잡하다면 apply를 사용하고, 단순 수식이면 numpy로 변환하는 것을 권장합니다.
     df['theoretical_cop'] = df['outdoor_temp_c'].apply(calculate_cop)
     
     # 3. 프리쿨링 효율 (free_cooling.py의 calculate_free_cooling_efficiency 로직 벡터화)
-    # 조건: T < 15 (1.0), 15 <= T < 22 (선형 감소), T >= 22 (0.0)
     temp_eff = np.where(
         df['outdoor_temp_c'] < FREE_COOLING_THRESHOLD_C, 1.0,
-        np.where(df['outdoor_temp_c'] < 22.0, # HYBRID_THRESHOLD_C가 22.0이라고 가정
+        np.where(df['outdoor_temp_c'] < 22.0, 
                  1.0 - (df['outdoor_temp_c'] - FREE_COOLING_THRESHOLD_C) / (22.0 - FREE_COOLING_THRESHOLD_C), 
                  0.0)
     )
@@ -343,16 +337,16 @@ def build_train_features(df: pd.DataFrame, target_col: str = IT_TARGET_COL) -> p
     # ------------------------------------------------
     
     df['it_power_kw_lag_1'] = df[IT_TARGET_COL].shift(1)
-    df['it_power_kw_lag_2'] = df[IT_TARGET_COL].shift(2)   # 누락되어 있던 lag 추가
-    df['it_power_kw_lag_12'] = df[IT_TARGET_COL].shift(12) # 누락되어 있던 lag 추가
+    df['it_power_kw_lag_2'] = df[IT_TARGET_COL].shift(2)  
+    df['it_power_kw_lag_12'] = df[IT_TARGET_COL].shift(12) 
 
     df['it_power_x_outdoor_temp'] = df['it_power_kw_lag_1'] * df['outdoor_temp_c']
     df['free_cooling_x_it_power'] = df['free_cooling_available'] * df['it_power_kw_lag_1']
     
-    # 추가된 파생 변수 (에러 났던 부분 해결)
+    # 추가된 파생 변수
     df['it_power_x_humidity'] = df['it_power_kw_lag_1'] * df['outdoor_humidity']
     
-    # Diff 변수 이름을 명확하게 고정 (에러 났던 부분 해결)
+    # Diff 변수 이름을 명확하게 고정
     df['it_power_diff_1'] = df['it_power_kw_lag_1'] - df['it_power_kw_lag_2']
     df['it_power_diff_12'] = df['it_power_kw_lag_1'] - df['it_power_kw_lag_12']
 

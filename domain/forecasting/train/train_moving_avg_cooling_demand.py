@@ -20,7 +20,7 @@ MAPE 대신 명세서 요구사항 지표인 nMAE(Normalized MAE)를 주 지표�
 uv run python -m domain.forecasting.train.train_moving_avg_cooling_demand
 """
 
-DATA_PATH = "data/processed/synthetic_idc_1year.parquet"
+DATA_PATH = "data/processed/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "chiller_power_kw"
 TIMESTAMP_COL = "timestamp"
 
@@ -54,13 +54,11 @@ month_periods = df[TIMESTAMP_COL].dt.to_period("M")
 def evaluate_monthly(model: MovingAverageForecaster, label: str) -> dict:
     """
     각 월의 마지막 7일을 테스트 구간으로, 그 이전 전체 데이터를 history로 예측한다.
-    데이터 누수 없이 계절별 성능을 종합 평가한다.
+    데이터 누수 없이 계절별 성능을 종합 평가하며, LGBM과 동일한 양식으로 출력한다.
     """
     test_size = SEASONAL_PERIOD * TEST_DAYS
-    all_actual: list[float] = []
-    all_preds: list[float] = []
-    monthly_rows: list[tuple[str, str]] = []
-
+    monthly_results = []
+    
     for period in sorted(month_periods.unique()):
         month_mask = month_periods == period
         month_df = df[month_mask]
@@ -78,48 +76,63 @@ def evaluate_monthly(model: MovingAverageForecaster, label: str) -> dict:
         test_series = month_df.iloc[-test_size:][TARGET_COL].to_numpy(dtype=float)
         preds = model._forecast(history, test_size)
 
-        all_actual.extend(test_series)
-        all_preds.extend(preds)
-
+        # --- 월별 평가 지표 계산 ---
         mae_m = mean_absolute_error(test_series, preds)
         mean_act_m = float(np.mean(test_series))
-        if mean_act_m > 0:
-            nmae_m_str = f"{mae_m / mean_act_m * 100:.2f} %"
+        nmae_m = (mae_m / mean_act_m * 100) if mean_act_m > 0 else 0.0
+        
+        # 비영 구간 MAPE
+        nonzero_mask = test_series > 1.0
+        mape_nonzero_m = (
+            float(np.mean(np.abs((test_series[nonzero_mask] - preds[nonzero_mask]) / test_series[nonzero_mask])) * 100)
+            if nonzero_mask.sum() > 0 else 0.0
+        )
+        
+        # 칠러 미가동률
+        free_cooling_ratio = (test_series < 1.0).mean()
+        
+        # period(YYYY-MM)에서 월만 추출 (예: '2019-01' -> '01')
+        month_str = str(period).split('-')[1]
+        
+        monthly_results.append((month_str, mae_m, nmae_m, mape_nonzero_m, free_cooling_ratio))
+
+    # --- 테이블 출력 (LGBM 포맷 통일) ---
+    print(f"\n=== 1~12월 모델 평가 비교 요약 ({label}) ===")
+    print(f"{'월 (Month)':<7} {'MAE':>10} {'nMAE (전체)':>18} {'MAPE (비영)':>15} {'칠러 미가동률':>15}")
+    print("-" * 75)
+
+    total_mae = []
+    valid_nmae_list = []
+
+    for month_str, mae, nmae, mape_nonzero, fc_ratio in monthly_results:
+        total_mae.append(mae)
+        
+        if fc_ratio >= 0.90:
+            nmae_str = "(free cooling)"
+            mape_str = "- "
         else:
-            nmae_m_str = "-  (free cooling)"
-        monthly_rows.append((str(period), nmae_m_str))
+            nmae_str = f"{nmae:.2f} %"
+            mape_str = f"{mape_nonzero:.2f} %"
+            valid_nmae_list.append(nmae)
+            
+        print(f"{month_str}월{' ':<8} {mae:>7.2f} kW {nmae_str:>18} {mape_str:>15}  {fc_ratio:>15.1%}")
 
-    actual_arr = np.array(all_actual)
-    preds_arr = np.array(all_preds)
-
-    mae = mean_absolute_error(actual_arr, preds_arr)
-    rmse = np.sqrt(mean_squared_error(actual_arr, preds_arr))
-    mean_actual = float(np.mean(actual_arr))
-    nmae = (mae / mean_actual * 100) if mean_actual > 0 else float("inf")
-
-    nonzero = actual_arr > 1.0
-    mape_nonzero = (
-        float(np.mean(np.abs((actual_arr[nonzero] - preds_arr[nonzero]) / actual_arr[nonzero])) * 100)
-        if nonzero.sum() > 0 else float("inf")
-    )
-
-    print(f"=== {label} ===")
-    print(f"  MAE                      : {mae:.2f} kW")
-    print(f"  RMSE                     : {rmse:.2f} kW")
-    print(f"  nMAE (전체)              : {nmae:.2f} %  (요구사항: 10% 이내)")
-    print(f"  MAPE (비영 구간 한정)    : {mape_nonzero:.2f} %")
-    print()
-    print("  [월별 nMAE]")
-    for month_label, nmae_str in monthly_rows:
-        print(f"    {month_label}: {nmae_str}")
+    print("-" * 75)
+    
+    mean_mae = np.mean(total_mae) if total_mae else 0.0
+    print(f"연간 평균 MAE : {mean_mae:.2f} kW")
+    
+    if valid_nmae_list:
+        mean_valid_nmae = np.mean(valid_nmae_list)
+        print(f"유효 nMAE 평균 : {mean_valid_nmae:.2f} % (프리쿨링 월 제외)")
+    else:
+        mean_valid_nmae = float('inf')
     print()
 
     return {
         "label": label,
-        "mae": mae,
-        "rmse": rmse,
-        "nmae": nmae,
-        "mape_nonzero": mape_nonzero,
+        "mae": mean_mae,
+        "nmae": mean_valid_nmae,
     }
 
 
@@ -152,10 +165,10 @@ seasonal_result = evaluate_monthly(seasonal_model, "Seasonal MA (window=7, perio
 # =========================================================
 
 print("=== 모델 비교 요약 ===")
-print(f"{'모델':<40} {'nMAE (전체)':>12}")
-print("-" * 54)
+print(f"{'모델':<40} {'유효 nMAE (평균)':>15}")
+print("-" * 57)
 for r in [simple_result, seasonal_result]:
-    print(f"{r['label']:<40} {r['nmae']:>11.2f}%")
+    print(f"{r['label']:<40} {r['nmae']:>14.2f}%")
 print()
 print("※ LGBM 결과와 비교하려면 train_lgbm_cooling_demand.py 결과를 참고하세요.")
 
