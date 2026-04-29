@@ -181,7 +181,5 @@ nohup docker compose run --rm rl-service uv run python -m domain.controllers.rl_
 ### 평가
 
 ```bash
-uv run python scripts/eval_baseline.py \
-  --model data/models/exp-300k.zip \
-  --episodes 20
+PYTHONPATH=. uv run python scripts/eval_baseline.py --model data/models/sac-w09.zip
 ```
