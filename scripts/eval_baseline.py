@@ -47,29 +47,41 @@ def rule_based_policy(obs):
     return np.array([np.clip(result.supply_air_temp_setpoint_c, T_SUPPLY_MIN, T_SUPPLY_MAX)], dtype=np.float32)
 
 
-def random_policy(obs):
+def random_policy(_obs):
     return np.array([np.random.uniform(T_SUPPLY_MIN, T_SUPPLY_MAX)], dtype=np.float32)
 
 
 def fixed_policy(setpoint):
-    return lambda obs: np.array([setpoint], dtype=np.float32)
+    return lambda _obs: np.array([setpoint], dtype=np.float32)
 
 
-def rl_policy(model_path):
+def rl_policy(model_path, algo: str = "auto"):
+    import json
+    import zipfile
     from stable_baselines3 import PPO, SAC
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
     from stable_baselines3.common.monitor import Monitor
+
+    if algo == "auto":
+        with zipfile.ZipFile(model_path) as zf:
+            data = json.loads(zf.read("data"))
+        algo = "sac" if "sac" in data.get("policy_class", {}).get("__module__", "").lower() else "ppo"
+
     vecnorm_path = model_path.replace(".zip", "_vecnorm.pkl")
-    is_sac = not Path(vecnorm_path).exists()
-    if is_sac:
+    dummy = DummyVecEnv([lambda: Monitor(IDCEnv())])
+
+    if algo == "sac":
         model = SAC.load(model_path)
-        vec_env = None
     else:
         model = PPO.load(model_path)
-        dummy = DummyVecEnv([lambda: Monitor(IDCEnv())])
+
+    if Path(vecnorm_path).exists():
         vec_env = VecNormalize.load(vecnorm_path, dummy)
         vec_env.training = False
         vec_env.norm_reward = False
+    else:
+        vec_env = None
+
     def policy(obs):
         o = vec_env.normalize_obs(obs.reshape(1, -1).astype(np.float32)) if vec_env else obs.reshape(1, -1).astype(np.float32)
         action, _ = model.predict(o, deterministic=True)
@@ -104,8 +116,8 @@ def main():
     print_result("고정 setpoint 24°C", evaluate(env, fixed_policy(24.0), args.episodes))
     print_result("Random", evaluate(env, random_policy, args.episodes))
     if Path(args.model).exists():
-        algo_label = "SAC" if not Path(args.model.replace(".zip", "_vecnorm.pkl")).exists() else "PPO"
-        print_result(f"{algo_label} RL ({Path(args.model).stem})", evaluate(env, rl_policy(args.model), args.episodes))
+        policy = rl_policy(args.model)
+        print_result(f"RL ({Path(args.model).stem})", evaluate(env, policy, args.episodes))
     else:
         print(f"\n⚠ RL 모델 없음: {args.model}")
     print(f"\n{'=' * 50}\n")

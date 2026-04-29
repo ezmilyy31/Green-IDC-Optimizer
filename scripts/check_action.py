@@ -8,20 +8,31 @@ from stable_baselines3.common.monitor import Monitor
 from domain.controllers.idc_env import IDCEnv
 
 
+def _detect_algo(model_path: str) -> str:
+    import json
+    import zipfile
+    with zipfile.ZipFile(model_path) as zf:
+        data = json.loads(zf.read("data"))
+    return "sac" if "sac" in data.get("policy_class", {}).get("__module__", "").lower() else "ppo"
+
+
 def check(model_path: str, n_episodes: int = 3):
     vecnorm_path = model_path.replace(".zip", "_vecnorm.pkl")
-    is_sac = not Path(vecnorm_path).exists()
+    algo = _detect_algo(model_path)
+    print(f"[check_action] {algo.upper()} 모델 감지")
 
-    if is_sac:
+    if algo == "sac":
         model = SAC.load(model_path)
-        vec_env = None
-        print("[check_action] SAC 모델 감지 (vecnorm 없음)")
     else:
         model = PPO.load(model_path)
+
+    if Path(vecnorm_path).exists():
         dummy = DummyVecEnv([lambda: Monitor(IDCEnv())])
         vec_env = VecNormalize.load(vecnorm_path, dummy)
         vec_env.training = False
         vec_env.norm_reward = False
+    else:
+        vec_env = None
 
     env = IDCEnv(w_energy=0.5)
     all_actions = []
