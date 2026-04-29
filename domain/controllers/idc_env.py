@@ -64,16 +64,18 @@ class IDCEnv(gym.Env):
         supply_temp_setpoint: CRAH 공급 온도 [16, 27]°C
 
     보상:
-        -w_energy * (PUE - 1.0) - (1 - w_energy) * temp_violation
+        weighted   (기본): -w_energy*(PUE-1) - (1-w_energy)*violation_norm + pue_bonus
+        hierarchical: 위반 시 -temp_violation, 안전 시 -pue_overhead (목표 분리)
     """
 
     metadata = {"render_modes": []}
 
-    def __init__(self, max_episode_steps: int = EPISODE_STEPS, w_energy: float = 0.5):
+    def __init__(self, max_episode_steps: int = EPISODE_STEPS, w_energy: float = 0.5, reward_type: str = "weighted"):
         super().__init__()
 
         self._max_episode_steps = max_episode_steps
         self._w_energy = w_energy
+        self._reward_type = reward_type
         self._step_count = 0
         self._zone_temp = 22.0
         self._supply_temp = T_SUPPLY_DESIGN_C
@@ -158,13 +160,22 @@ class IDCEnv(gym.Env):
         pue_result = calculate_pue(it_power_kw, chiller_result.chiller_power_kw + fan_power_kw)
 
         # 보상
-        # temp_violation을 pue_overhead와 같은 스케일(0~1)로 정규화 (최대 위반 9°C 기준)
         pue_overhead = pue_result.pue - 1.0
         temp_violation = max(0.0, self._zone_temp - T_ZONE_UPPER) + max(0.0, T_ZONE_LOWER - self._zone_temp)
-        temp_violation_norm = temp_violation / 9.0
-        # 온도 위반 없을 때 PUE가 낮을수록 양의 보너스 (에이전트가 높은 setpoint 탐색하도록 유도)
-        pue_bonus = max(0.0, 0.4 - pue_overhead) if temp_violation == 0.0 else 0.0
-        reward = -(self._w_energy * pue_overhead + (1 - self._w_energy) * temp_violation_norm) + pue_bonus
+
+        if self._reward_type == "hierarchical":
+            # 안전/효율 목표 완전 분리
+            # 위반 시: PUE 신호 없이 위반 크기만큼 패널티 → 온도 먼저 학습
+            # 안전 시: violation 신호 없이 PUE만 최적화 → 에너지 효율 학습
+            if temp_violation > 0.0:
+                reward = -temp_violation
+            else:
+                reward = -pue_overhead
+        else:
+            # weighted (기존): 가중합 + conditional pue_bonus
+            temp_violation_norm = temp_violation / 9.0
+            pue_bonus = max(0.0, 0.4 - pue_overhead) if temp_violation == 0.0 else 0.0
+            reward = -(self._w_energy * pue_overhead + (1 - self._w_energy) * temp_violation_norm) + pue_bonus
 
         self._step_count += 1
         self._data_idx += 1
