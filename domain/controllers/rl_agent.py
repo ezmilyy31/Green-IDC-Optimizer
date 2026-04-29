@@ -14,7 +14,7 @@ import numpy as np
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from domain.controllers.idc_env import IDCEnv
 
@@ -73,23 +73,34 @@ class TrainingLogCallback(BaseCallback):
             self._file.close()
 
 
-def make_env(max_episode_steps: int = 96, w_energy: float = 0.5, custom_env: bool = False) -> VecNormalize:
-    """env 생성 + Monitor + VecNormalize 래핑."""
+def _make_single_env(max_episode_steps: int, w_energy: float, custom_env: bool):
+    """SubprocVecEnv용 pickle 가능한 env factory."""
     if custom_env:
-        env_fn = lambda: Monitor(IDCEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
-    else:
-        env_fn = lambda: Monitor(DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
-    vec_env = DummyVecEnv([env_fn])
+        return Monitor(IDCEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
+    return Monitor(DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
+
+
+def make_env(
+    max_episode_steps: int = 96,
+    w_energy: float = 0.5,
+    custom_env: bool = False,
+    n_envs: int = 1,
+) -> VecNormalize:
+    """env 생성 + Monitor + VecNormalize 래핑. n_envs > 1이면 SubprocVecEnv 사용."""
+    import functools
+    env_fns = [
+        functools.partial(_make_single_env, max_episode_steps, w_energy, custom_env)
+        for _ in range(n_envs)
+    ]
+    vec_env = SubprocVecEnv(env_fns) if n_envs > 1 else DummyVecEnv(env_fns)
     return VecNormalize(vec_env, norm_obs=True, norm_reward=False, clip_obs=10.0)
 
 
 def make_env_raw(max_episode_steps: int = 96, w_energy: float = 0.5, custom_env: bool = False) -> DummyVecEnv:
-    """SAC용 — VecNormalize 없이 DummyVecEnv만 반환."""
-    if custom_env:
-        env_fn = lambda: Monitor(IDCEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
-    else:
-        env_fn = lambda: Monitor(DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
-    return DummyVecEnv([env_fn])
+    """VecNormalize 없이 DummyVecEnv만 반환."""
+    import functools
+    env_fns = [functools.partial(_make_single_env, max_episode_steps, w_energy, custom_env)]
+    return DummyVecEnv(env_fns)
 
 
 def train(
@@ -107,6 +118,7 @@ def train(
     ent_coef: float = 0.0,
     log_std_init: float = 0.0,
     algo: str = "ppo",
+    n_envs: int = 1,
 ) -> Path:
     """PPO 학습 실행.
 
@@ -137,22 +149,24 @@ def train(
     callbacks = [log_cb, checkpoint_cb]
 
     if algo == "sac":
-        # SAC: off-policy, VecNormalize 대신 normalize_advantage 없음
-        # obs 정규화는 SAC policy_kwargs로 처리 (NormalizeObservation wrapper 불필요)
-        raw_env = make_env_raw(max_episode_steps, w_energy, custom_env)
+        env = make_env(max_episode_steps, w_energy, custom_env, n_envs)
         if resume:
             print(f"[rl_agent] SAC 이어서 학습: {resume}")
-            model = SAC.load(resume, env=raw_env, device=device, learning_rate=lr)
+            stats_path = str(resume).replace(".zip", "") + "_vecnorm.pkl"
+            if Path(stats_path).exists():
+                env = VecNormalize.load(stats_path, env)
+                print(f"[rl_agent] VecNormalize 통계 복원: {stats_path}")
+            model = SAC.load(resume, env=env, device=device, learning_rate=lr)
         else:
             model = SAC(
                 "MlpPolicy",
-                raw_env,
+                env,
                 learning_rate=lr,
                 buffer_size=200_000,
                 batch_size=batch_size,
                 gamma=gamma,
                 tau=0.005,
-                ent_coef="auto",   # entropy 자동 튜닝 (탐색/활용 균형)
+                ent_coef="auto",
                 verbose=1,
                 tensorboard_log=None,
                 device=device,
@@ -164,11 +178,14 @@ def train(
         save_path = MODEL_DIR / run_name
         model.save(str(save_path))
         print(f"[rl_agent] SAC 모델 저장 완료: {save_path}.zip")
-        raw_env.close()
+        vecnorm_path = str(save_path) + "_vecnorm.pkl"
+        env.save(vecnorm_path)
+        print(f"[rl_agent] VecNormalize 통계 저장 완료: {vecnorm_path}")
+        env.close()
         return save_path
 
     # PPO (기본)
-    env = make_env(max_episode_steps, w_energy, custom_env)
+    env = make_env(max_episode_steps, w_energy, custom_env, n_envs)
 
     if resume:
         print(f"[rl_agent] 모델 이어서 학습: {resume}")
@@ -253,6 +270,7 @@ def parse_args():
     parser.add_argument("--ent-coef", type=float, default=0.0, help="entropy 보너스 계수 (탐색 강도)")
     parser.add_argument("--log-std-init", type=float, default=0.0, help="초기 action std (log scale)")
     parser.add_argument("--algo", type=str, default="ppo", choices=["ppo", "sac"], help="RL 알고리즘 (ppo|sac)")
+    parser.add_argument("--n-envs", type=int, default=1, help="병렬 환경 수 (>1이면 SubprocVecEnv)")
     return parser.parse_args()
 
 
@@ -273,4 +291,5 @@ if __name__ == "__main__":
         ent_coef=args.ent_coef,
         log_std_init=args.log_std_init,
         algo=args.algo,
+        n_envs=args.n_envs,
     )
