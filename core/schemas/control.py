@@ -7,9 +7,15 @@ class ControlRequest(BaseModel):
     outdoor_humidity: float = Field(default=50.0, ge=0.0, le=100.0)  # 외기 습도 (%), free cooling 효율 보정
     it_power_kw: float = Field(..., gt=0.0)            # 현재 IT 전력 (kW), 냉각 부하 계산
     timestamp: datetime | None = None  # 시각, RL에서 time_of_day 특성
+
+    # RL 추론용 (rule-based 엔드포인트에서는 무시됨, /control/rl에서만 필수)
+    zone_temp_c: float | None = Field(default=None, ge=5.0, le=50.0, description="서버실 온도 (°C)")
+    supply_setpoint_c: float | None = Field(default=None, ge=10.0, le=35.0, description="현재 공급 온도 setpoint (°C)")
+    cpu_utilization: float | None = Field(default=None, ge=0.0, le=1.0, description="CPU 부하율 (0~1)")
+
     # PID 연동 시 추가
     # server_inlet_temp_c: float     서버 입구 온도, PID가 현재 온도로 받아야 하는 값
-    # server_outlet_temp_c: float   서버 출구 온도, 냉각 부하 계산시 온도 변화량 계산 
+    # server_outlet_temp_c: float   서버 출구 온도, 냉각 부하 계산시 온도 변화량 계산
 
 
 class ControlResponse(BaseModel):

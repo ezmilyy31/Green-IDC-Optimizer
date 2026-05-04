@@ -1,13 +1,17 @@
-from fastapi import FastAPI
+import numpy as np
+from fastapi import FastAPI, HTTPException
+
+from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
+from core.config.enums import CoolingMode
 from core.schemas.control import ControlRequest, ControlResponse
-from domain.controllers.rule_based import run_rule_based
+from domain.controllers.rule_based import decide_cooling_mode, run_rule_based
 
 app = FastAPI(title="Control Service")
 
 """
 POST /api/v1/control/optimize → 현재 최적 제어 결과 (rule_based, 추후 RL로 교체)
 POST /control/rule-based      → Rule-based 제어 결과
-POST /control/rl              → RL 에이전트 결과 (Week 4)
+POST /control/rl              → RL(SAC) 에이전트 결과
 POST /control/mpc             → MPC 최적 설정값 (선택)
 POST /control/scenario        → 위기 시나리오 주입
 GET  /control/status          → 현재 제어 상태
@@ -47,9 +51,45 @@ def rule_based(req: ControlRequest) -> ControlResponse:
 
 @app.post("/control/rl")
 def rl_control(req: ControlRequest) -> ControlResponse:
-    # TODO: Week 4 RL 에이전트 연동, 임의값 넣어 둠
+    """SAC 모델로 supply setpoint 추론.
+
+    cooling_mode/free_cooling_ratio는 외기 온도 기반 derive (rule_based와 동일 기준).
+    """
+    missing = [k for k, v in {
+        "zone_temp_c": req.zone_temp_c,
+        "supply_setpoint_c": req.supply_setpoint_c,
+        "cpu_utilization": req.cpu_utilization,
+    }.items() if v is None]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"RL 추론에 필요한 필드 누락: {missing}")
+
+    hour = req.timestamp.hour if req.timestamp else 12
+    obs = np.array([
+        hour,
+        req.outdoor_temp_c,
+        req.outdoor_humidity,
+        req.cpu_utilization,
+        req.zone_temp_c,
+        req.supply_setpoint_c,
+        req.it_power_kw,
+    ], dtype=np.float32)
+
+    try:
+        from domain.controllers.rl_inference import RLInference
+        setpoint = RLInference.get().predict(obs)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=f"RL 모델 로드 실패: {e}")
+
+    cooling_mode = decide_cooling_mode(req.outdoor_temp_c)
+    if cooling_mode == CoolingMode.FREE_COOLING:
+        ratio = 1.0
+    elif cooling_mode == CoolingMode.HYBRID:
+        ratio = 1 - (req.outdoor_temp_c - FREE_COOLING_THRESHOLD_C) / (HYBRID_THRESHOLD_C - FREE_COOLING_THRESHOLD_C)
+    else:
+        ratio = 0.0
+
     return ControlResponse(
-        cooling_mode = "hybrid",
-        supply_air_temp_setpoint_c=20.0,
-        free_cooling_ratio=0.5
+        cooling_mode=cooling_mode.value,
+        supply_air_temp_setpoint_c=setpoint,
+        free_cooling_ratio=ratio,
     )
