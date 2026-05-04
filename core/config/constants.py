@@ -7,6 +7,12 @@ HYBRID_THRESHOLD_C = 22.0         # 이하: 혼합 모드
 FAN_POWER_RATIO_FREE = 0.035      # 자연공조 시 팬 전력 (3.5%)
 FAN_POWER_RATIO_CHILLER = 0.08    # 기계식 냉방 시 팬 전력 (8%)
 
+# 팬 전력 모델 (Affinity Law: P_fan ∝ m_air³) — IDCEnv용 가변 풍량 모델
+FAN_POWER_DESIGN_KW = 18.5        # 설계 풍량에서 정격 팬 전력 (kW) — 232kW × 0.08 ≈ 18.5
+M_AIR_MAX_KG_S = 66.0             # CRAH 최대 풍량 (설계의 2배) — 풍량 상한
+MIN_DELTA_T_C = 1.0               # 풍량 역산 분모 보호 (°C) — supply ≥ return 비현실 케이스 방지
+FAN_AFFINITY_EXP = 2.5            # 팬 전력 affinity law 지수 — 이론 3, 실측 보수적 2.5
+
 # 냉각 부하 설계 파라미터 (SyntheticIDCBuilder 기준, p.15-16)
 T_SUPPLY_DESIGN_C = 20.0          # CRAH 공급 온도 설계값 (°C)
 T_RETURN_DESIGN_C = 27.0          # 환기 온도 설계값 (°C)
