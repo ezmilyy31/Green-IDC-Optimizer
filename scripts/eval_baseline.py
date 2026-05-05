@@ -43,7 +43,8 @@ def evaluate(env: IDCEnv, policy_fn, n_episodes: int = 20, seed: int = 42) -> di
 
 
 def rule_based_policy(obs):
-    result = run_rule_based(float(obs[1]), float(obs[2]), float(obs[6]))
+    # obs: [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power]
+    result = run_rule_based(float(obs[1]), float(obs[3]), float(obs[7]))
     return np.array([np.clip(result.supply_air_temp_setpoint_c, T_SUPPLY_MIN, T_SUPPLY_MAX)], dtype=np.float32)
 
 
@@ -105,9 +106,9 @@ def main():
     parser.add_argument("--episodes", type=int, default=20)
     args = parser.parse_args()
 
-    env = IDCEnv(w_energy=0.5)
+    env = IDCEnv(w_energy=0.8)
     print(f"\n{'=' * 50}")
-    print("  IDCEnv 베이스라인 비교 평가 (평가 환경: w_energy=0.5 고정)")
+    print("  IDCEnv 베이스라인 비교 평가 (평가 환경: w_energy=0.8, 학습과 동일)")
     print(f"  에피소드 수: {args.episodes} (1일 × {args.episodes})")
     print(f"{'=' * 50}")
 
