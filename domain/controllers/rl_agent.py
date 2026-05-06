@@ -264,7 +264,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=64, help="mini-batch size")
     parser.add_argument("--gamma", type=float, default=0.9, help="discount factor")
     parser.add_argument("--total-timesteps", type=int, default=50_000, help="총 학습 step")
-    parser.add_argument("--max-episode-steps", type=int, default=96, help="에피소드 길이 (96=1일, 15분 간격)")
+    parser.add_argument("--max-episode-steps", type=int, default=288, help="에피소드 길이 (288=1일, 5분 간격)")
     parser.add_argument("--w-energy", type=float, default=0.5, help="보상 에너지 항 가중치 (0~1)")
     parser.add_argument("--run-name", type=str, default="ppo-baseline", help="실험 이름")
     parser.add_argument("--device", type=str, default="auto", help="auto|cuda|cpu")
