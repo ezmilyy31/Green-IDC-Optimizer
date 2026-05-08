@@ -28,7 +28,7 @@ from core.config.constants import (
     FAN_AFFINITY_EXP,
 )
 from core.config.enums import CoolingMode
-from domain.thermodynamics.chiller import calculate_chiller_power_kw
+from domain.thermodynamics.chiller import calculate_chiller_power_kw, calculate_wet_bulb_c
 from domain.thermodynamics.it_power import calculate_total_it_power_kw
 from domain.thermodynamics.pue import calculate_pue
 
@@ -80,9 +80,10 @@ def _load_real_data(data_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray
 class IDCEnv(gym.Env):
     """커스텀 IDC 강화학습 환경.
 
-    관측 (8개):
-        [hour, outdoor_temp, outdoor_trend, humidity, cpu_utilization, zone_temp, supply_setpoint, it_power_kw]
+    관측 (9개):
+        [hour, outdoor_temp, outdoor_trend, humidity, cpu_utilization, zone_temp, supply_setpoint, it_power_kw, wet_bulb]
         outdoor_trend: 현재 외기온도 - 최근 1시간 평균 (양수: 더워지는 중, 음수: 식는 중)
+        wet_bulb: 습구온도 — 냉각 모드 전환 기준 (free <10°C, hybrid <18°C) 직접 노출
 
     행동 (1개):
         supply_temp_setpoint: CRAH 공급 온도 [18, 25]°C
@@ -109,10 +110,11 @@ class IDCEnv(gym.Env):
         self._outdoor_history: deque = deque(maxlen=TREND_WINDOW)
         # zone_temp/supply_temp는 reset()에서 재설정됨 (gym 표준상 reset 후 step 보장)
 
-        # 관측: [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power]
+        # 관측: [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power, wet_bulb]
         # zone_temp 범위 5~50: 안전 위반 영역(<18, >27)도 obs로 허용 → 위반 페널티가 학습 신호
-        obs_low  = np.array([0,  -15, -15, 20, 0.0,  5.0, T_SUPPLY_MIN,   0.0], dtype=np.float32)
-        obs_high = np.array([23,  45,  15, 95, 1.0, 50.0, T_SUPPLY_MAX, 400.0], dtype=np.float32)
+        # wet_bulb 범위 -15~35: 한국 연간 습구온도 커버 (겨울 -15°C ~ 여름 35°C)
+        obs_low  = np.array([0,  -15, -15, 20, 0.0,  5.0, T_SUPPLY_MIN,   0.0, -15], dtype=np.float32)
+        obs_high = np.array([23,  45,  15, 95, 1.0, 50.0, T_SUPPLY_MAX, 400.0,  35], dtype=np.float32)
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
         self.action_space = spaces.Box(
@@ -151,13 +153,12 @@ class IDCEnv(gym.Env):
     def _get_obs(self) -> np.ndarray:
         row = self._data[self._data_idx % len(self._data)]
         outdoor_temp = float(row[0])
-        if len(self._outdoor_history) > 0:
-            trend = outdoor_temp - float(np.mean(self._outdoor_history))
-        else:
-            trend = 0.0
+        humidity = float(row[1])
+        trend = outdoor_temp - float(np.mean(self._outdoor_history)) if self._outdoor_history else 0.0
+        wet_bulb = calculate_wet_bulb_c(outdoor_temp, humidity)
         it_power = self._compute_it_power(row[2])
         return np.array(
-            [row[3], outdoor_temp, trend, row[1], row[2], self._zone_temp, self._supply_temp, it_power],
+            [row[3], outdoor_temp, trend, humidity, row[2], self._zone_temp, self._supply_temp, it_power, wet_bulb],
             dtype=np.float32,
         )
 
