@@ -11,14 +11,17 @@ import argparse
 import numpy as np
 from pathlib import Path
 
-from domain.controllers.idc_env import IDCEnv, T_SUPPLY_MIN, T_SUPPLY_MAX
+from domain.controllers.idc_env import IDCEnv, T_SUPPLY_MIN, T_SUPPLY_MAX, TIMESTEP_SEC
 from domain.controllers.rule_based import run_rule_based
+from domain.controllers.pid import PIDController
 
 
-def evaluate(env: IDCEnv, policy_fn, n_episodes: int = 20, seed: int = 42) -> dict:
+def evaluate(env: IDCEnv, policy_fn, n_episodes: int = 20, seed: int = 42, on_episode_reset=None) -> dict:
     rewards, pues, violations, zone_temps = [], [], [], []
     for ep in range(n_episodes):
         obs, _ = env.reset(seed=seed + ep)
+        if on_episode_reset is not None:
+            on_episode_reset()
         ep_reward, ep_pues, ep_violations, ep_zone_temps = 0.0, [], [], []
         while True:
             action = policy_fn(obs)
@@ -54,6 +57,24 @@ def random_policy(_obs):
 
 def fixed_policy(setpoint):
     return lambda _obs: np.array([setpoint], dtype=np.float32)
+
+
+def make_pid_policy(setpoint: float = 24.0, dt: float = float(TIMESTEP_SEC)):
+    pid = PIDController(
+        setpoint=setpoint,
+        output_min=T_SUPPLY_MIN,
+        output_max=T_SUPPLY_MAX,
+    )
+
+    def policy(obs):
+        zone_temp = float(obs[5])
+        supply = pid.compute(zone_temp, dt=dt)
+        return np.array([supply], dtype=np.float32)
+
+    def on_reset():
+        pid.reset()
+
+    return policy, on_reset
 
 
 def rl_policy(model_path, algo: str = "auto"):
@@ -115,6 +136,8 @@ def main():
     print_result("Rule-based", evaluate(env, rule_based_policy, args.episodes))
     print_result("고정 setpoint 20°C (설계값)", evaluate(env, fixed_policy(20.0), args.episodes))
     print_result("고정 setpoint 24°C", evaluate(env, fixed_policy(24.0), args.episodes))
+    pid_policy, pid_reset = make_pid_policy()
+    print_result("PID (zone target=24°C)", evaluate(env, pid_policy, args.episodes, on_episode_reset=pid_reset))
     print_result("Random", evaluate(env, random_policy, args.episodes))
     if Path(args.model).exists():
         policy = rl_policy(args.model)
