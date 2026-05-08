@@ -242,3 +242,72 @@ class IDCEnv(gym.Env):
             "temp_violation": temp_violation,
             "cooling_mode": chiller_result.cooling_mode.value,
         }
+
+
+def simulate_summary(
+    model_path: str | None = None,
+    max_episode_steps: int = 288,
+    seed: int = 42,
+) -> dict:
+    """IDCEnv 1 에피소드 시뮬레이션 후 Multi-Zone 히트맵 베이스값 요약 반환.
+
+    dashboard `3_분석_도구.py`의 Multi-Zone Heatmap 탭에서 mock(`np.random`) 대신
+    실제 시뮬레이션 결과로 base 스칼라를 공급하기 위한 헬퍼.
+
+    Args:
+        model_path: SAC 모델 zip 경로 (vecnorm.pkl 페어 자동 로드).
+            None이면 rule_based로 매 step setpoint 결정 (베이스라인 비교용).
+        max_episode_steps: 에피소드 길이 (288 = 1일, 5분 간격).
+        seed: 시뮬레이션 시드.
+
+    Returns:
+        peak_zone_temp_c:     IT 전력 peak 시점의 서버실 온도 (히트맵 온도 base)
+        avg_it_power_kw:      에피소드 평균 IT 전력 (히트맵 IT 전력 base)
+        avg_cooling_power_kw: 에피소드 평균 냉각 전력 (히트맵 칠러 전력 base)
+        supply_temp_c:        IT 전력 peak 시점의 supply 온도
+        controller:           "rule_based" or "rl"
+    """
+    inference = None
+    if model_path:
+        from domain.controllers.rl_inference import RLInference
+        inference = RLInference(model_path)
+        controller_name = "rl"
+    else:
+        from domain.controllers.rule_based import calculate_setpoint, decide_cooling_mode
+        controller_name = "rule_based"
+
+    env = IDCEnv(max_episode_steps=max_episode_steps)
+    obs, _ = env.reset(seed=seed)
+
+    zone_temps: list[float] = []
+    supply_temps: list[float] = []
+    it_powers: list[float] = []
+    cooling_powers: list[float] = []
+
+    done = False
+    while not done:
+        if inference is not None:
+            setpoint = inference.predict(obs)
+        else:
+            outdoor_temp = float(obs[1])
+            mode = decide_cooling_mode(outdoor_temp)
+            setpoint = calculate_setpoint(mode, outdoor_temp)
+
+        obs, _, term, trunc, info = env.step(np.array([setpoint], dtype=np.float32))
+
+        zone_temps.append(info["zone_temp_c"])
+        supply_temps.append(float(obs[6]))
+        it_powers.append(info["it_power_kw"])
+        cooling_powers.append(info["cooling_power_kw"])
+        done = term or trunc
+
+    it_arr = np.array(it_powers)
+    peak_idx = int(np.argmax(it_arr))
+
+    return {
+        "peak_zone_temp_c":     float(zone_temps[peak_idx]),
+        "avg_it_power_kw":      float(it_arr.mean()),
+        "avg_cooling_power_kw": float(np.mean(cooling_powers)),
+        "supply_temp_c":        float(supply_temps[peak_idx]),
+        "controller":           controller_name,
+    }
