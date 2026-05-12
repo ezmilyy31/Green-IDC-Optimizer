@@ -19,7 +19,7 @@ class RLInference:
     """SAC + VecNormalize 페어 로드 및 추론 캐시.
 
     obs 순서 (IDCEnv와 동일):
-        [hour, outdoor_temp, humidity, cpu_util, zone_temp, supply_temp, it_power]
+        [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power, wet_bulb]
     action: supply_temp_setpoint (°C)
     """
 

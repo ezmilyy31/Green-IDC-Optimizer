@@ -63,15 +63,21 @@ def rl_control(req: ControlRequest) -> ControlResponse:
     if missing:
         raise HTTPException(status_code=422, detail=f"RL 추론에 필요한 필드 누락: {missing}")
 
+    from domain.thermodynamics.chiller import calculate_wet_bulb_c
     hour = req.timestamp.hour if req.timestamp else 12
+    wet_bulb = calculate_wet_bulb_c(req.outdoor_temp_c, req.outdoor_humidity)
+    # obs 순서: IDCEnv._get_obs()와 동일
+    # [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power, wet_bulb]
     obs = np.array([
         hour,
         req.outdoor_temp_c,
+        req.outdoor_temp_trend_c_per_s,
         req.outdoor_humidity,
         req.cpu_utilization,
         req.zone_temp_c,
         req.supply_setpoint_c,
         req.it_power_kw,
+        wet_bulb,
     ], dtype=np.float32)
 
     try:
