@@ -11,7 +11,8 @@ import argparse
 import numpy as np
 from pathlib import Path
 
-from domain.controllers.idc_env import IDCEnv, T_SUPPLY_MIN, T_SUPPLY_MAX
+from domain.controllers.idc_env import IDCEnv, T_SUPPLY_MIN, T_SUPPLY_MAX, TIMESTEP_SEC
+from domain.controllers.pid import PIDController
 from domain.controllers.rule_based import run_rule_based
 
 
@@ -19,6 +20,8 @@ def evaluate(env: IDCEnv, policy_fn, n_episodes: int = 20, seed: int = 42) -> di
     rewards, pues, violations, zone_temps = [], [], [], []
     for ep in range(n_episodes):
         obs, _ = env.reset(seed=seed + ep)
+        if hasattr(policy_fn, "reset_hook"):
+            policy_fn.reset_hook()
         ep_reward, ep_pues, ep_violations, ep_zone_temps = 0.0, [], [], []
         while True:
             action = policy_fn(obs)
@@ -46,6 +49,22 @@ def rule_based_policy(obs):
     # obs: [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power]
     result = run_rule_based(float(obs[1]), float(obs[3]), float(obs[7]))
     return np.array([np.clip(result.supply_air_temp_setpoint_c, T_SUPPLY_MIN, T_SUPPLY_MAX)], dtype=np.float32)
+
+
+def pid_policy():
+    pid = PIDController()
+
+    def _reset_hook():
+        pid.reset()
+
+    def policy(obs):
+        # obs: [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power, wet_bulb]
+        zone_temp = float(obs[5])
+        supply = pid.compute(zone_temp, dt=TIMESTEP_SEC)
+        return np.array([np.clip(supply, T_SUPPLY_MIN, T_SUPPLY_MAX)], dtype=np.float32)
+
+    policy.reset_hook = _reset_hook
+    return policy
 
 
 def random_policy(_obs):
@@ -102,7 +121,7 @@ def print_result(name, result):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="data/models/exp-custom-idc.zip")
+    parser.add_argument("--model", type=str, default="data/models/sac-wetbulb-1m.zip")
     parser.add_argument("--episodes", type=int, default=20)
     args = parser.parse_args()
 
@@ -113,6 +132,7 @@ def main():
     print(f"{'=' * 50}")
 
     print_result("Rule-based", evaluate(env, rule_based_policy, args.episodes))
+    print_result("PID", evaluate(env, pid_policy(), args.episodes))
     print_result("고정 setpoint 20°C (설계값)", evaluate(env, fixed_policy(20.0), args.episodes))
     print_result("고정 setpoint 24°C", evaluate(env, fixed_policy(24.0), args.episodes))
     print_result("Random", evaluate(env, random_policy, args.episodes))
