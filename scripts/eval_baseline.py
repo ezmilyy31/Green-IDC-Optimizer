@@ -51,22 +51,6 @@ def rule_based_policy(obs):
     return np.array([np.clip(result.supply_air_temp_setpoint_c, T_SUPPLY_MIN, T_SUPPLY_MAX)], dtype=np.float32)
 
 
-def pid_policy():
-    pid = PIDController()
-
-    def _reset_hook():
-        pid.reset()
-
-    def policy(obs):
-        # obs: [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power, wet_bulb]
-        zone_temp = float(obs[5])
-        supply = pid.compute(zone_temp, dt=TIMESTEP_SEC)
-        return np.array([np.clip(supply, T_SUPPLY_MIN, T_SUPPLY_MAX)], dtype=np.float32)
-
-    policy.reset_hook = _reset_hook
-    return policy
-
-
 def random_policy(_obs):
     return np.array([np.random.uniform(T_SUPPLY_MIN, T_SUPPLY_MAX)], dtype=np.float32)
 
@@ -150,11 +134,10 @@ def main():
     print(f"{'=' * 50}")
 
     print_result("Rule-based", evaluate(env, rule_based_policy, args.episodes))
-    print_result("PID", evaluate(env, pid_policy(), args.episodes))
     print_result("고정 setpoint 20°C (설계값)", evaluate(env, fixed_policy(20.0), args.episodes))
     print_result("고정 setpoint 24°C", evaluate(env, fixed_policy(24.0), args.episodes))
-    pid_policy, pid_reset = make_pid_policy()
-    print_result("PID (zone target=24°C)", evaluate(env, pid_policy, args.episodes, on_episode_reset=pid_reset))
+    pid_pol, pid_reset = make_pid_policy()
+    print_result("PID (zone target=24°C)", evaluate(env, pid_pol, args.episodes, on_episode_reset=pid_reset))
     print_result("Random", evaluate(env, random_policy, args.episodes))
     if Path(args.model).exists():
         policy = rl_policy(args.model)
