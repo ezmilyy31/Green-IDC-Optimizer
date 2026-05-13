@@ -12,6 +12,7 @@ class ControlRequest(BaseModel):
     zone_temp_c: float | None = Field(default=None, ge=5.0, le=50.0, description="서버실 온도 (°C)")
     supply_setpoint_c: float | None = Field(default=None, ge=10.0, le=35.0, description="현재 공급 온도 setpoint (°C)")
     cpu_utilization: float | None = Field(default=None, ge=0.0, le=1.0, description="CPU 부하율 (0~1)")
+    outdoor_temp_trend_c_per_s: float = Field(default=0.0, description="외기 온도 변화율 (°C/s), 미제공 시 0으로 근사")
 
     # PID 연동 시 추가
     # server_inlet_temp_c: float     서버 입구 온도, PID가 현재 온도로 받아야 하는 값
