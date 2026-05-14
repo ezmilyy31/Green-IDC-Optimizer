@@ -2,6 +2,9 @@
 
 best 모델 + VecNormalize 통계 페어를 1회 로드하고 캐시한다 (싱글톤).
 모델 경로는 settings.rl_model_path로 관리되며, 환경변수 RL_MODEL_PATH로 override 가능.
+
+위기 시나리오(서버 급증/폭염/칠러 고장 등) OOD 상황에서 catastrophic 실패를
+막기 위해, predict() 결과에 rule-based safe fallback을 적용한다.
 """
 
 from pathlib import Path
@@ -12,7 +15,19 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from core.config.settings import settings
-from domain.controllers.idc_env import IDCEnv
+from domain.controllers.idc_env import (
+    IDCEnv,
+    T_SUPPLY_MIN,
+    T_SUPPLY_MAX,
+    T_ZONE_LOWER,
+    T_ZONE_UPPER,
+)
+
+# Safe fallback 임계값: zone temp 위반 한계에서 여유를 두고 오버라이드 작동
+SAFE_HIGH_C = T_ZONE_UPPER - 0.5  # 26.5°C: 한계 직전에 강력 냉각
+SAFE_LOW_C = T_ZONE_LOWER + 1.0   # 19.0°C: 한계 직전에 냉각 완화
+
+ZONE_TEMP_OBS_INDEX = 5
 
 
 class RLInference:
@@ -53,4 +68,11 @@ class RLInference:
         obs_batch = obs.reshape(1, -1).astype(np.float32)
         obs_norm = self._vec_env.normalize_obs(obs_batch)
         action, _ = self._model.predict(obs_norm, deterministic=True)
-        return float(action.flatten()[0])
+        rl_action = float(action.flatten()[0])
+
+        zone_temp = float(obs[ZONE_TEMP_OBS_INDEX])
+        if zone_temp > SAFE_HIGH_C:
+            return T_SUPPLY_MIN
+        if zone_temp < SAFE_LOW_C:
+            return T_SUPPLY_MAX
+        return rl_action

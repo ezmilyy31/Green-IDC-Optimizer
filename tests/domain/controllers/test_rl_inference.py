@@ -93,3 +93,78 @@ class TestPredict:
         action = inf.predict(obs)
         assert isinstance(action, float)
         assert T_SUPPLY_MIN <= action <= T_SUPPLY_MAX
+
+
+class _StubVecEnv:
+    """normalize_obs 가 들어온 obs 를 그대로 돌려주는 fake."""
+
+    def normalize_obs(self, obs):
+        return obs
+
+
+class _StubModel:
+    """predict() 가 항상 고정된 RL action 을 돌려주는 fake."""
+
+    def __init__(self, action: float):
+        self._action = action
+
+    def predict(self, obs, deterministic=True):
+        return np.array([[self._action]], dtype=np.float32), None
+
+
+def _make_obs(zone_temp: float) -> np.ndarray:
+    """IDCEnv 9-dim obs 생성: zone_temp 만 가변, 나머지는 정상 범위 임의값.
+
+    obs 순서: [hour, outdoor_temp, outdoor_trend, humidity, cpu_util,
+              zone_temp, supply_temp, it_power, wet_bulb]
+    """
+    return np.array(
+        [12.0, 25.0, 0.5, 60.0, 0.5, zone_temp, 20.0, 200.0, 18.0],
+        dtype=np.float32,
+    )
+
+
+def _make_inference_with_stubs(rl_action: float) -> RLInference:
+    """__init__ 우회 + 가짜 model/vec_env 주입. fallback 로직만 검증용."""
+    inf = RLInference.__new__(RLInference)
+    inf._model = _StubModel(rl_action)
+    inf._vec_env = _StubVecEnv()
+    return inf
+
+
+class TestSafeFallback:
+    """위기 OOD 상황에서 zone_temp 기준 강제 오버라이드 동작 검증."""
+
+    def test_overrides_to_supply_min_when_zone_above_safe_high(self):
+        from domain.controllers.idc_env import T_SUPPLY_MIN
+
+        inf = _make_inference_with_stubs(rl_action=22.0)
+        # zone_temp = 27.0 > SAFE_HIGH_C (26.5)
+        action = inf.predict(_make_obs(zone_temp=27.0))
+        assert action == T_SUPPLY_MIN
+
+    def test_overrides_to_supply_max_when_zone_below_safe_low(self):
+        from domain.controllers.idc_env import T_SUPPLY_MAX
+
+        inf = _make_inference_with_stubs(rl_action=22.0)
+        # zone_temp = 18.5 < SAFE_LOW_C (19.0)
+        action = inf.predict(_make_obs(zone_temp=18.5))
+        assert action == T_SUPPLY_MAX
+
+    def test_passes_rl_action_when_zone_in_safe_range(self):
+        inf = _make_inference_with_stubs(rl_action=22.0)
+        # zone_temp = 22.0, 안전 범위 (19.0, 26.5) 안
+        action = inf.predict(_make_obs(zone_temp=22.0))
+        assert action == 22.0
+
+    def test_boundary_safe_high_is_inclusive(self):
+        """SAFE_HIGH_C (26.5) 정확히 같을 때는 fallback 미발동 (strict >)."""
+        inf = _make_inference_with_stubs(rl_action=22.0)
+        action = inf.predict(_make_obs(zone_temp=26.5))
+        assert action == 22.0
+
+    def test_boundary_safe_low_is_inclusive(self):
+        """SAFE_LOW_C (19.0) 정확히 같을 때는 fallback 미발동 (strict <)."""
+        inf = _make_inference_with_stubs(rl_action=22.0)
+        action = inf.predict(_make_obs(zone_temp=19.0))
+        assert action == 22.0
