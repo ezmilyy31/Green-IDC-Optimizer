@@ -73,10 +73,21 @@ class TrainingLogCallback(BaseCallback):
             self._file.close()
 
 
-def _make_single_env(max_episode_steps: int, w_energy: float, custom_env: bool, reward_type: str = "weighted"):
+def _make_single_env(
+    max_episode_steps: int,
+    w_energy: float,
+    custom_env: bool,
+    reward_type: str = "weighted",
+    domain_randomize: bool = False,
+):
     """SubprocVecEnv용 pickle 가능한 env factory."""
     if custom_env:
-        return Monitor(IDCEnv(max_episode_steps=max_episode_steps, w_energy=w_energy, reward_type=reward_type))
+        return Monitor(IDCEnv(
+            max_episode_steps=max_episode_steps,
+            w_energy=w_energy,
+            reward_type=reward_type,
+            domain_randomize=domain_randomize,
+        ))
     return Monitor(DataCenterRLEnv(max_episode_steps=max_episode_steps, w_energy=w_energy))
 
 
@@ -86,11 +97,12 @@ def make_env(
     custom_env: bool = False,
     n_envs: int = 1,
     reward_type: str = "weighted",
+    domain_randomize: bool = False,
 ) -> VecNormalize:
     """env 생성 + Monitor + VecNormalize 래핑. n_envs > 1이면 SubprocVecEnv 사용."""
     import functools
     env_fns = [
-        functools.partial(_make_single_env, max_episode_steps, w_energy, custom_env, reward_type)
+        functools.partial(_make_single_env, max_episode_steps, w_energy, custom_env, reward_type, domain_randomize)
         for _ in range(n_envs)
     ]
     vec_env = SubprocVecEnv(env_fns) if n_envs > 1 else DummyVecEnv(env_fns)
@@ -121,6 +133,8 @@ def train(
     algo: str = "ppo",
     n_envs: int = 1,
     reward_type: str = "weighted",
+    domain_randomize: bool = False,
+    freeze_vecnorm: bool = False,
 ) -> Path:
     """PPO 학습 실행.
 
@@ -151,13 +165,17 @@ def train(
     callbacks = [log_cb, checkpoint_cb]
 
     if algo == "sac":
-        env = make_env(max_episode_steps, w_energy, custom_env, n_envs, reward_type)
+        env = make_env(max_episode_steps, w_energy, custom_env, n_envs, reward_type, domain_randomize)
         if resume:
             print(f"[rl_agent] SAC 이어서 학습: {resume}")
             stats_path = str(resume).replace(".zip", "") + "_vecnorm.pkl"
             if Path(stats_path).exists():
                 env = VecNormalize.load(stats_path, env)
                 print(f"[rl_agent] VecNormalize 통계 복원: {stats_path}")
+            if freeze_vecnorm:
+                env.training = False
+                # norm_reward는 그대로 True 유지 → 기존 reward scale 보존
+                print("[rl_agent] VecNormalize 통계 동결 (training=False)")
             model = SAC.load(resume, env=env, device=device, learning_rate=lr)
         else:
             model = SAC(
@@ -188,7 +206,7 @@ def train(
         return save_path
 
     # PPO (기본)
-    env = make_env(max_episode_steps, w_energy, custom_env, n_envs, reward_type)
+    env = make_env(max_episode_steps, w_energy, custom_env, n_envs, reward_type, domain_randomize)
 
     if resume:
         print(f"[rl_agent] 모델 이어서 학습: {resume}")
@@ -196,6 +214,9 @@ def train(
         if Path(stats_path).exists():
             env = VecNormalize.load(stats_path, env)
             print(f"[rl_agent] VecNormalize 통계 복원: {stats_path}")
+        if freeze_vecnorm:
+            env.training = False
+            print("[rl_agent] VecNormalize 통계 동결 (training=False)")
         model = PPO.load(resume, env=env, device=device, learning_rate=lr)
     else:
         model = PPO(
@@ -276,6 +297,10 @@ def parse_args():
     parser.add_argument("--n-envs", type=int, default=1, help="병렬 환경 수 (>1이면 SubprocVecEnv)")
     parser.add_argument("--reward-type", type=str, default="weighted", choices=["weighted", "hierarchical"],
                         help="보상 함수 타입: weighted(기존 가중합) | hierarchical(안전/효율 분리)")
+    parser.add_argument("--domain-randomize", action="store_true",
+                        help="IDCEnv 도메인 랜덤화 (위기 시나리오 fine-tune용, custom-env 전용)")
+    parser.add_argument("--freeze-vecnorm", action="store_true",
+                        help="resume 시 VecNormalize 통계 동결 (fine-tune 모드, normalizer 안정화)")
     return parser.parse_args()
 
 
@@ -298,4 +323,6 @@ if __name__ == "__main__":
         algo=args.algo,
         n_envs=args.n_envs,
         reward_type=args.reward_type,
+        domain_randomize=args.domain_randomize,
+        freeze_vecnorm=args.freeze_vecnorm,
     )
