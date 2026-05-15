@@ -73,7 +73,8 @@ def _run_simulation_local(
         it_power_kw  = calculate_total_it_power_kw(util, num_cpu, num_gpu)
         cooling_load = calculate_cooling_load_from_it_power_kw(it_power_kw)
 
-        chiller              = calculate_chiller_power_kw(cooling_load, outdoor_temp)
+        # 한국 평균 습도 ~60% 사용 (실측 시즌별 변동 시 변경 필요)
+        chiller              = calculate_chiller_power_kw(cooling_load, outdoor_temp, supply_temp_c, 60.0)
         actual_chiller_power = chiller.chiller_power_kw * cfg["chiller_ratio"]
 
         unmet_cooling = cooling_load * (1.0 - cfg["chiller_ratio"])

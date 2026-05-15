@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from core.config.enums import CoolingMode
-from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 from domain.thermodynamics.cooling_load import(
     calculate_cooling_load_from_it_power_kw,
     calculate_cooling_load_from_airflow_kw,
@@ -347,9 +346,9 @@ class SyntheticIDCBuilder:
     
     #(New) Calculate Chiller Power info (domain/chiller.py)
     #cooling_load_from_it
-    def calculate_chiller_power(self, cooling_load, outside_temp):
-        """COP 기반 칠러 전력 계산"""
-        return calculate_chiller_power_kw(cooling_load, outside_temp)
+    def calculate_chiller_power(self, cooling_load, outside_temp, outside_humidity=60.0):
+        """COP 기반 칠러 전력 계산 (습도 영향 반영)."""
+        return calculate_chiller_power_kw(cooling_load, outside_temp, 20.0, outside_humidity)
         #COP(float), Chiller Power kw(Float), Cooling Mode(Enum)
     
     #(New) Calculate Free Cooling info (domain/free_cooling.py)
@@ -406,7 +405,7 @@ class SyntheticIDCBuilder:
 
         # 4. 칠러: chiller_power_kw + cooling_mode
         def calc_chiller(row):
-            result = self.calculate_chiller_power(row['cooling_load_it_kw'], row['outside_temp_c'])
+            result = self.calculate_chiller_power(row['cooling_load_it_kw'], row['outside_temp_c'], row['outside_humidity_pct'])
             return pd.Series({
                 'chiller_power_kw': result.chiller_power_kw,
                 'cooling_mode': result.cooling_mode,

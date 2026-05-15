@@ -23,7 +23,8 @@ import numpy as np
 import pandas as pd
 
 from core.config.enums import CoolingMode, ModelType, PredictionTarget
-from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
+from core.config.constants import WET_BULB_FREE_THRESHOLD_C, WET_BULB_HYBRID_THRESHOLD_C
+from domain.thermodynamics.chiller import calculate_wet_bulb_c
 from core.schemas.forecast import ForecastPoint, ForecastRequest, ForecastResponse
 from domain.forecasting.features.builder import _build_next_feature_row
 from domain.forecasting.intervals import build_quantile_interval
@@ -359,7 +360,7 @@ def _merge_predictions_to_points(
 
             item = by_ts.setdefault(ts, {"timestamp": ts})
             item["predicted_cooling_load_kw"] = pred
-            item["cooling_mode"] = _rule_based_cooling_mode(row.get("outdoor_temp_c"))
+            item["cooling_mode"] = _rule_based_cooling_mode(row.get("outdoor_temp_c"), row.get("outdoor_humidity_pct"))
 
             if include_prediction_interval:
                 if "lower_bound" in row and "upper_bound" in row:
@@ -510,14 +511,20 @@ def _prepare_weather_df(weather_payload: Any, step_minutes: int) -> pd.DataFrame
     )
     return df
 
-def _rule_based_cooling_mode(outdoor_temp_c: Any) -> CoolingMode:
+def _rule_based_cooling_mode(outdoor_temp_c: Any, outdoor_humidity_pct: Any = None) -> CoolingMode:
+    """습구 온도 기반 cooling mode 판정 (환경/Rule-based와 동일 기준).
+
+    humidity 누락 시 한국 평균 60% 가정.
+    """
     if outdoor_temp_c is None or pd.isna(outdoor_temp_c):
         return CoolingMode.CHILLER
 
     outdoor_temp_c = float(outdoor_temp_c)
+    humidity = 60.0 if outdoor_humidity_pct is None or pd.isna(outdoor_humidity_pct) else float(outdoor_humidity_pct)
+    wet_bulb = calculate_wet_bulb_c(outdoor_temp_c, humidity)
 
-    if outdoor_temp_c <= FREE_COOLING_THRESHOLD_C:
+    if wet_bulb < WET_BULB_FREE_THRESHOLD_C:
         return CoolingMode.FREE_COOLING
-    if outdoor_temp_c <= HYBRID_THRESHOLD_C:
+    if wet_bulb < WET_BULB_HYBRID_THRESHOLD_C:
         return CoolingMode.HYBRID
     return CoolingMode.CHILLER

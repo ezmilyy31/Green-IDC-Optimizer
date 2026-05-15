@@ -1,10 +1,11 @@
 import numpy as np
 from fastapi import FastAPI, HTTPException
 
-from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
+from core.config.constants import WET_BULB_FREE_THRESHOLD_C, WET_BULB_HYBRID_THRESHOLD_C
 from core.config.enums import CoolingMode
 from core.schemas.control import ControlRequest, ControlResponse
 from domain.controllers.rule_based import decide_cooling_mode, run_rule_based
+from domain.thermodynamics.chiller import calculate_wet_bulb_c
 
 app = FastAPI(title="Control Service")
 
@@ -86,11 +87,14 @@ def rl_control(req: ControlRequest) -> ControlResponse:
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=f"RL 모델 로드 실패: {e}")
 
-    cooling_mode = decide_cooling_mode(req.outdoor_temp_c)
+    # wet-bulb 기준 cooling mode (rule_based와 환경 일관성 유지)
+    cooling_mode = decide_cooling_mode(req.outdoor_temp_c, req.outdoor_humidity)
     if cooling_mode == CoolingMode.FREE_COOLING:
         ratio = 1.0
     elif cooling_mode == CoolingMode.HYBRID:
-        ratio = 1 - (req.outdoor_temp_c - FREE_COOLING_THRESHOLD_C) / (HYBRID_THRESHOLD_C - FREE_COOLING_THRESHOLD_C)
+        ratio = 1.0 - (wet_bulb - WET_BULB_FREE_THRESHOLD_C) / (
+            WET_BULB_HYBRID_THRESHOLD_C - WET_BULB_FREE_THRESHOLD_C
+        )
     else:
         ratio = 0.0
 

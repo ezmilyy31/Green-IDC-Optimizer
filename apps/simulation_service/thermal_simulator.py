@@ -105,7 +105,7 @@ class ThermalSimulator:
         sim = ThermalSimulator()
         for t in range(steps):
             q_in = calculate_cooling_load_from_it_power_kw(it_power_kw)
-            q_out = calculate_chiller_power_kw(q_in, outdoor_temp_c).chiller_power_kw * cop
+            q_out = calculate_chiller_power_kw(q_in, outdoor_temp_c, supply_temp_c, humidity_pct).chiller_power_kw * cop
             result = sim.step(q_in, q_out)
             print(result.t_zone_c)
     """

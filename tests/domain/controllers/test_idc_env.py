@@ -33,10 +33,11 @@ class TestReset:
         assert env.observation_space.contains(obs)
         assert info == {}
 
-    def test_obs_length_is_eight(self, env):
-        # 회귀 방지: outdoor_trend 인덱스 변경 검출
+    def test_obs_length_is_nine(self, env):
+        # 회귀 방지: wet_bulb 추가로 9-dim (hour, outdoor_temp, outdoor_trend, humidity,
+        #                                    cpu_util, zone_temp, supply_temp, it_power, wet_bulb)
         obs, _ = env.reset(seed=0)
-        assert obs.shape == (8,)
+        assert obs.shape == (9,)
 
     def test_reset_is_deterministic_with_seed(self, env):
         obs1, _ = env.reset(seed=42)
