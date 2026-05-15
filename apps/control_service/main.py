@@ -50,12 +50,8 @@ def rule_based(req: ControlRequest) -> ControlResponse:
     )
 
 
-@app.post("/control/rl")
-def rl_control(req: ControlRequest) -> ControlResponse:
-    """SAC 모델로 supply setpoint 추론.
-
-    cooling_mode/free_cooling_ratio는 외기 온도 기반 derive (rule_based와 동일 기준).
-    """
+def _build_obs(req: ControlRequest) -> np.ndarray:
+    """ControlRequest → IDCEnv 9-dim obs 변환. RL 필수 필드 누락 시 422 raise."""
     missing = [k for k, v in {
         "zone_temp_c": req.zone_temp_c,
         "supply_setpoint_c": req.supply_setpoint_c,
@@ -69,7 +65,7 @@ def rl_control(req: ControlRequest) -> ControlResponse:
     wet_bulb = calculate_wet_bulb_c(req.outdoor_temp_c, req.outdoor_humidity)
     # obs 순서: IDCEnv._get_obs()와 동일
     # [hour, outdoor_temp, outdoor_trend, humidity, cpu_util, zone_temp, supply_temp, it_power, wet_bulb]
-    obs = np.array([
+    return np.array([
         hour,
         req.outdoor_temp_c,
         req.outdoor_temp_trend_c_per_s,
@@ -81,23 +77,60 @@ def rl_control(req: ControlRequest) -> ControlResponse:
         wet_bulb,
     ], dtype=np.float32)
 
-    try:
-        from domain.controllers.rl_inference import RLInference
-        setpoint = RLInference.get().predict(obs)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=f"RL 모델 로드 실패: {e}")
 
-    # wet-bulb 기준 cooling mode (rule_based와 환경 일관성 유지)
-    cooling_mode = decide_cooling_mode(req.outdoor_temp_c, req.outdoor_humidity)
+def _derive_cooling_metadata(outdoor_temp_c: float) -> tuple[CoolingMode, float]:
+    """외기 온도 기반 cooling_mode + free_cooling_ratio 계산 (rule_based와 동일 기준)."""
+    cooling_mode = decide_cooling_mode(outdoor_temp_c)
     if cooling_mode == CoolingMode.FREE_COOLING:
         ratio = 1.0
     elif cooling_mode == CoolingMode.HYBRID:
-        ratio = 1.0 - (wet_bulb - WET_BULB_FREE_THRESHOLD_C) / (
-            WET_BULB_HYBRID_THRESHOLD_C - WET_BULB_FREE_THRESHOLD_C
-        )
+        ratio = 1 - (outdoor_temp_c - FREE_COOLING_THRESHOLD_C) / (HYBRID_THRESHOLD_C - FREE_COOLING_THRESHOLD_C)
     else:
         ratio = 0.0
+    return cooling_mode, ratio
 
+
+@app.post("/control/rl")
+def rl_control(req: ControlRequest) -> ControlResponse:
+    """효율 우선 best 모델로 supply setpoint 추론 (PUE 최우수).
+
+    safe fallback 자동 적용 (zone > 26.5°C 시 T_SUPPLY_MIN 강제).
+    위기 시나리오(특히 server_surge) robustness가 필요하면 /control/rl-hybrid 사용.
+    """
+    obs = _build_obs(req)
+    try:
+        from domain.controllers.rl_inference import predict_best
+        setpoint = predict_best(obs)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=f"RL 모델 로드 실패: {e}")
+
+    cooling_mode, ratio = _derive_cooling_metadata(req.outdoor_temp_c)
+    return ControlResponse(
+        cooling_mode=cooling_mode.value,
+        supply_air_temp_setpoint_c=setpoint,
+        free_cooling_ratio=ratio,
+    )
+
+
+@app.post("/control/rl-hybrid")
+def rl_hybrid_control(req: ControlRequest) -> ControlResponse:
+    """안전 우선 hybrid 정책으로 supply setpoint 추론.
+
+    부하 신호(cpu_util > 0.50 OR it_power > 165kW) 또는 온도 경고(zone ≥ 26.0°C)
+    시 safety 모델(sac-dr-fresh-1m) 사용, 그 외엔 best 모델 사용. 모든 시나리오
+    위반 0% 달성 (server_surge 포함).
+
+    응답 시그니처는 /control/rl과 동일 — 시뮬레이션/대시보드에서 엔드포인트만 바꿔
+    호출하면 됨.
+    """
+    obs = _build_obs(req)
+    try:
+        from domain.controllers.rl_inference import predict_hybrid
+        setpoint = predict_hybrid(obs)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=f"RL 모델 로드 실패: {e}")
+
+    cooling_mode, ratio = _derive_cooling_metadata(req.outdoor_temp_c)
     return ControlResponse(
         cooling_mode=cooling_mode.value,
         supply_air_temp_setpoint_c=setpoint,
