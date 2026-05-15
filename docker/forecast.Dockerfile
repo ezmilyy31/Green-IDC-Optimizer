@@ -1,15 +1,13 @@
-FROM python:3.11-slim
+FROM python:3.11-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# 1. OS 종속성 설치 (캐시 활용을 위해 위쪽에 배치)
-RUN apt-get update && apt-get install -y \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
-    
+# libgomp1은 non-slim 이미지에 이미 포함되어 있어 별도 apt 단계 불필요
+# (slim 사용 시 deb.debian.org 미러가 KR/arm64에서 매우 느려 빌드 실패 빈발)
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock .python-version /app/
