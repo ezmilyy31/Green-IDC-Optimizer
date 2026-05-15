@@ -41,7 +41,8 @@ def calculate(req: SimulationRequest) -> SimulationResponse:
     IT 전력과 외기 온도를 입력받아 냉각 부하, 칠러 전력, PUE를 반환한다.
     """
     cooling_load_kw = calculate_cooling_load_from_it_power_kw(req.it_power_kw)
-    chiller_result = calculate_chiller_power_kw(cooling_load_kw, req.outdoor_temp_c)
+    # 한국 평균 습도 60% (schema에 humidity 추가 시 req.humidity 사용)
+    chiller_result = calculate_chiller_power_kw(cooling_load_kw, req.outdoor_temp_c, 20.0, 60.0)
     pue_result = calculate_pue(req.it_power_kw, chiller_result.chiller_power_kw)
 
     return SimulationResponse(
@@ -102,7 +103,8 @@ def simulate_24h(req: Simulate24hRequest) -> Simulate24hResponse:
         cooling_load_kw = calculate_cooling_load_from_it_power_kw(it_power_kw)
 
         # 칠러 전력 (위기 시 chiller_ratio로 용량 축소)
-        chiller = calculate_chiller_power_kw(cooling_load_kw, outdoor_temp)
+        # 한국 평균 습도 60% (schema에 humidity 추가 시 req.humidity 사용)
+        chiller = calculate_chiller_power_kw(cooling_load_kw, outdoor_temp, req.supply_temp_c, 60.0)
         actual_chiller_power = chiller.chiller_power_kw * cfg["chiller_ratio"]
 
         # PUE

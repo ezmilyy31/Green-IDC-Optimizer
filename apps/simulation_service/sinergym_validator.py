@@ -241,7 +241,8 @@ def run_validation() -> bool:
             continue
 
         # ── 자체 열역학 모델 계산 ──────────────────────────────────────────
-        chiller_result  = calculate_chiller_power_kw(cooling_load_kw, outdoor_temp_c)
+        # 한국 평균 습도 60% (Sinergym obs에 humidity 있다면 추출해서 전달)
+        chiller_result  = calculate_chiller_power_kw(cooling_load_kw, outdoor_temp_c, 20.0, 60.0)
         pue_result      = calculate_pue(it_power_kw, chiller_result.chiller_power_kw)
 
         # Sinergym PUE: (실제 서버 발열 + 전체 HVAC) / 실제 서버 발열

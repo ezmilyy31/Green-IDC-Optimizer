@@ -128,7 +128,8 @@ def run_pid_loop(
                 supply_temp_c=supply_temp_c,
                 return_temp_c=sim.t_zone_c,
             )
-            chiller = calculate_chiller_power_kw(q_out_air, outdoor_temp_c)
+            # 한국 평균 습도 60% (실측 humidity 입력 시 인자로 전달)
+            chiller = calculate_chiller_power_kw(q_out_air, outdoor_temp_c, supply_temp_c, 60.0)
             q_out_kw = min(q_out_air, chiller_max_active * chiller.cop)
         else:
             q_out_kw = 0.0
