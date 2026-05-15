@@ -20,7 +20,8 @@ from apps.dashboard.constants import (
     COOLING_MODE_LABELS,
     CRISIS_STRATEGIES,
 )
-from core.config.constants import FREE_COOLING_THRESHOLD_C
+from core.config.constants import WET_BULB_FREE_THRESHOLD_C
+from domain.thermodynamics.chiller import calculate_wet_bulb_c
 from apps.dashboard.sidebar import render_sidebar
 
 d = render_sidebar()
@@ -34,7 +35,11 @@ st.divider()
 # ── Section 1: 냉각 제어 ─────────────────────────────────────────────────
 
 mode_label   = COOLING_MODE_LABELS.get(d["current_mode"], d["current_mode"])
-free_cool_ok = d["current_outdoor"] < FREE_COOLING_THRESHOLD_C
+# 습구 온도 기반 자유공조 가용 판정 (환경 칠러 모델과 동일 기준)
+# 대시보드 시뮬은 습도 미추적 → 한국 평균 60% 가정
+_humidity_assumption = 60.0
+_wet_bulb = calculate_wet_bulb_c(d["current_outdoor"], _humidity_assumption)
+free_cool_ok = _wet_bulb < WET_BULB_FREE_THRESHOLD_C
 
 # Free Cooling 상태 배지
 fc_color = CLR_GOOD if free_cool_ok else "#64748b"

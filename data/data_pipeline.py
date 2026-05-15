@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from core.config.enums import CoolingMode
-from core.config.constants import FREE_COOLING_THRESHOLD_C, HYBRID_THRESHOLD_C
 from domain.thermodynamics.cooling_load import(
     calculate_cooling_load_from_it_power_kw,
     calculate_cooling_load_from_airflow_kw,

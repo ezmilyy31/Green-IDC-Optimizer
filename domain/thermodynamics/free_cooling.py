@@ -10,8 +10,8 @@
 from dataclasses import dataclass
 
 from core.config.constants import (
-    FREE_COOLING_THRESHOLD_C,
-    HYBRID_THRESHOLD_C,
+    WET_BULB_FREE_THRESHOLD_C,
+    WET_BULB_HYBRID_THRESHOLD_C,
     FAN_POWER_RATIO_FREE,
     FAN_POWER_RATIO_CHILLER,
 )
@@ -42,39 +42,39 @@ def calculate_free_cooling_efficiency(
       2. 습도: 습도가 낮을수록 증발 냉각 효과 높음 (간접 효과)
       3. 공급 온도 설정값: 목표 온도와 외기 온도의 차이가 클수록 유리
 
-    효율 계산:
-      - 완전 자연공조 (T < 15°C): efficiency = 1.0
-      - 혼합 구간 (15°C ≤ T < 22°C): 선형 감소
-      - 기계식 전환 (T ≥ 22°C): efficiency = 0.0
+    효율 계산 (습구 온도 기준 — 잠열 부하 반영):
+      - 완전 자연공조 (T_wb < 10°C): efficiency = 1.0
+      - 혼합 구간 (10°C ≤ T_wb < 18°C): 선형 감소
+      - 기계식 전환 (T_wb ≥ 18°C): efficiency = 0.0
 
     Args:
-        outdoor_temp_c: 외기 온도 (°C)
+        outdoor_temp_c: 외기 dry-bulb 온도 (°C)
         outdoor_humidity_pct: 외기 상대 습도 (%, 0~100)
         supply_temp_setpoint_c: CRAH 공급 온도 설정값 (°C)
 
     Returns:
         자연공조 효율 (0.0 ~ 1.0)
     """
-    # 기본 온도 기반 효율
-    if outdoor_temp_c < FREE_COOLING_THRESHOLD_C:
+    from domain.thermodynamics.chiller import calculate_wet_bulb_c
+
+    # 습구 온도 기반 효율 (잠열 부하 반영, 환경 chiller 모델과 일치)
+    wet_bulb = calculate_wet_bulb_c(outdoor_temp_c, outdoor_humidity_pct)
+    if wet_bulb < WET_BULB_FREE_THRESHOLD_C:
         temp_efficiency = 1.0
-    elif outdoor_temp_c < HYBRID_THRESHOLD_C:
-        # 15°C ~ 22°C 구간: 선형 감소
-        temp_efficiency = 1.0 - (outdoor_temp_c - FREE_COOLING_THRESHOLD_C) / (
-            HYBRID_THRESHOLD_C - FREE_COOLING_THRESHOLD_C
+    elif wet_bulb < WET_BULB_HYBRID_THRESHOLD_C:
+        # wet-bulb 10~18°C 구간: 선형 감소
+        temp_efficiency = 1.0 - (wet_bulb - WET_BULB_FREE_THRESHOLD_C) / (
+            WET_BULB_HYBRID_THRESHOLD_C - WET_BULB_FREE_THRESHOLD_C
         )
     else:
         temp_efficiency = 0.0
-
-    # 습도 보정: 높은 습도는 효율을 약간 감소 (증발 냉각 효과 감소)
-    # 50% 습도를 기준으로, 100%일 때 최대 10% 효율 감소
-    humidity_factor = 1.0 - max(0.0, (outdoor_humidity_pct - 50.0) / 500.0)
 
     # 공급 온도 여유도 보정: 외기와 목표 온도 차이가 클수록 효율 향상
     temp_margin = supply_temp_setpoint_c - outdoor_temp_c
     margin_factor = min(1.0, max(0.8, 1.0 + temp_margin * 0.02))
 
-    return min(1.0, max(0.0, temp_efficiency * humidity_factor * margin_factor))
+    # 습도는 이미 wet_bulb에 반영됨 → 별도 humidity_factor 불필요
+    return min(1.0, max(0.0, temp_efficiency * margin_factor))
 
 
 def calculate_free_cooling(
