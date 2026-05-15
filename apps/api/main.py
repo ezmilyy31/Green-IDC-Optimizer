@@ -49,6 +49,12 @@ async def control_rl(request: Request) -> JSONResponse:
     return await _proxy_post(f"{_CONTROL_URL}/control/rl", request)
 
 
+@app.post("/control/rl-hybrid")
+async def control_rl_hybrid(request: Request) -> JSONResponse:
+    """부하/온도 위기 자동 감지 → safety 모델 전환. /control/rl과 응답 호환."""
+    return await _proxy_post(f"{_CONTROL_URL}/control/rl-hybrid", request)
+
+
 # ── Forecast Service ──────────────────────────────────────────────────────────
 
 @app.post("/api/v1/forecast")
