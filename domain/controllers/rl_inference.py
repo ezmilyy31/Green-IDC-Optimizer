@@ -38,8 +38,8 @@ SAFE_LOW_C = T_ZONE_LOWER + 1.0   # 19.0°C: 한계 직전에 냉각 완화
 #   normal:       cpu mean=0.40 max=0.52, it_power mean=144 max=161
 #   server_surge: cpu mean=0.52 max=0.67, it_power mean=161 max=183
 HYBRID_SWITCH_C = 26.0          # zone temp 임계 (사후 신호, fallback 26.5보다 낮게)
-HYBRID_CPU_THRESH = 0.50        # cpu_util 임계 (사전 신호)
-HYBRID_IT_POWER_THRESH = 165.0  # it_power 임계 (사전 신호)
+HYBRID_CPU_THRESH = 0.55        # cpu_util 임계 (사전 신호) — normal max 0.52보다 위로 올려 누적 손해 최소화
+HYBRID_IT_POWER_THRESH = 170.0  # it_power 임계 (사전 신호) — normal max 161보다 위, surge max 183 아래
 
 # IDCEnv obs 인덱스
 ZONE_TEMP_OBS_INDEX = 5

@@ -60,8 +60,8 @@ def with_safe_fallback(rl_pol):
 # 임계 2 (사전 신호): cpu_util > 0.50     — normal max(0.52) 직전, surge mean(0.52) 위
 # 임계 3 (사전 신호): it_power > 165 kW   — normal max(161) 위, surge max(183) 아래
 HYBRID_SWITCH_C = 26.0
-HYBRID_CPU_THRESH = 0.50
-HYBRID_IT_POWER_THRESH = 165.0
+HYBRID_CPU_THRESH = 0.55
+HYBRID_IT_POWER_THRESH = 170.0
 
 # IDCEnv obs 인덱스 (zone_temp는 rl_inference에서 가져옴)
 CPU_UTIL_OBS_INDEX = 4
