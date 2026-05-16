@@ -19,7 +19,7 @@ from apps.dashboard.styles import inject_global_styles
 from apps.dashboard.api_client import (
     get_all_service_status,
     optimize_control,
-    rl_control,
+    rl_hybrid_control,
 )
 from apps.dashboard.constants import (
     CRISIS_CONFIGS,
@@ -115,13 +115,13 @@ def render_sidebar() -> dict:
         _sec("위기 시나리오")
         c0, c1 = st.columns(2)
         c2, c3 = st.columns(2)
-        if c0.button("정상",     use_container_width=True):
+        if c0.button("정상",     width="stretch"):
             st.session_state.crisis_mode = None
-        if c1.button("서버 급증", use_container_width=True):
+        if c1.button("서버 급증", width="stretch"):
             st.session_state.crisis_mode = "server_surge"
-        if c2.button("냉각 고장", use_container_width=True):
+        if c2.button("냉각 고장", width="stretch"):
             st.session_state.crisis_mode = "chiller_failure"
-        if c3.button("폭염",     use_container_width=True):
+        if c3.button("폭염",     width="stretch"):
             st.session_state.crisis_mode = "heat_wave"
 
         crisis_mode = st.session_state.crisis_mode
@@ -197,12 +197,23 @@ def render_sidebar() -> dict:
     else:
         df_base = esg_base = avg_pue_base = None
 
-    # TODO(RL): ctrl_rl 응답은 현재 고정값 반환 중 (cooling_mode="hybrid", expected_pue=1.35).
-    #   Week 4 PPO/DQN RL 에이전트 구현 후 실제 추론값으로 자동 교체됨.
     # TODO(Simulation Service): ctrl_rule 응답의 expected_pue도 고정값 1.35.
     #   Simulation Service 연동 후 실측값으로 교체됨.
-    ctrl_rule = optimize_control(current_outdoor, peak_it_power)
-    ctrl_rl   = rl_control(current_outdoor, peak_it_power)
+    # RL 추론은 zone_temp/supply/cpu_util 필드를 함께 전달 (control_service /control/rl 요구)
+    # IDCEnv 모델 관계: t_return = zone_temp + 2 → zone_temp = return_temp - 2
+    # 잘못 보내면 RLInference 안전 폴백(zone>26.5℃)이 발동해 setpoint가 강제로 18℃로 고정됨.
+    peak_cpu_util  = df.loc[peak_idx, "CPU 사용률 (%)"] / 100.0
+    peak_return_temp_c = df.loc[peak_idx, "환기 온도 (°C)"]
+    peak_zone_temp = max(supply_temp, peak_return_temp_c - 2.0)
+    # RL은 hybrid 정책 — 위기(부하/온도) 자동 감지 후 safety 모델로 전환.
+    # 위기 시나리오 토글 시 RL이 더 보수적인 setpoint를 내놓는 모습이 보임.
+    ctrl_rule = optimize_control(current_outdoor, peak_it_power, outdoor_humidity=60.0)
+    ctrl_rl   = rl_hybrid_control(
+        current_outdoor, peak_it_power, outdoor_humidity=60.0,
+        zone_temp_c=peak_zone_temp,
+        supply_setpoint_c=supply_temp,
+        cpu_utilization=peak_cpu_util,
+    )
 
     # 위기 모드 전환 알람
     if crisis_mode != st.session_state.prev_crisis:

@@ -76,61 +76,116 @@ def get_all_service_status() -> dict[str, bool]:
 def _build_control_payload(
     outdoor_temp_c: float,
     it_power_kw: float,
-    outdoor_humidity_pct: float = 50.0,
+    outdoor_humidity: float = 50.0,
+    *,
+    zone_temp_c: float | None = None,
+    supply_setpoint_c: float | None = None,
+    cpu_utilization: float | None = None,
+    outdoor_temp_trend_c_per_s: float = 0.0,
+    timestamp: str | None = None,
 ) -> dict:
-    return {
-        "outdoor_temp_c":       outdoor_temp_c,
-        "it_power_kw":          it_power_kw,
-        "outdoor_humidity_pct": outdoor_humidity_pct,
+    """ControlRequest 스키마와 정합되는 페이로드.
+
+    rule-based 엔드포인트는 처음 3개만 사용. RL 엔드포인트는 zone/supply/cpu 추가 필요.
+    """
+    payload: dict = {
+        "outdoor_temp_c":   outdoor_temp_c,
+        "it_power_kw":      it_power_kw,
+        "outdoor_humidity": outdoor_humidity,
+        "outdoor_temp_trend_c_per_s": outdoor_temp_trend_c_per_s,
     }
+    if zone_temp_c is not None:
+        payload["zone_temp_c"] = zone_temp_c
+    if supply_setpoint_c is not None:
+        payload["supply_setpoint_c"] = supply_setpoint_c
+    if cpu_utilization is not None:
+        payload["cpu_utilization"] = cpu_utilization
+    if timestamp is not None:
+        payload["timestamp"] = timestamp
+    return payload
 
 
 def optimize_control(
     outdoor_temp_c: float,
     it_power_kw: float,
-    outdoor_humidity_pct: float = 50.0,
+    outdoor_humidity: float = 50.0,
 ) -> dict:
-    """POST /api/v1/control/optimize — API Gateway 경유 최적 제어.
-
-    TODO(Simulation Service): 응답의 `expected_pue` 필드가 현재 고정값 1.35를 반환.
-        Simulation Service /simulate/step 연동 후 실측 PUE로 교체 필요 (api_spec.md §2).
-    TODO(Control Service): 현재 Rule-based 로직 고정.
-        MPC(POST /api/v1/control/mpc) 또는 RL(POST /control/rl) 구현 완료 후
-        가장 성능이 좋은 방식으로 라우팅 변경 (api_spec.md §2 교체 필요 항목).
-    """
+    """POST /api/v1/control/optimize — 현재 Rule-based 라우팅."""
     return _post(
         f"{API_URL}/api/v1/control/optimize",
-        _build_control_payload(outdoor_temp_c, it_power_kw, outdoor_humidity_pct),
+        _build_control_payload(outdoor_temp_c, it_power_kw, outdoor_humidity),
     )
 
 
 def rule_based_control(
     outdoor_temp_c: float,
     it_power_kw: float,
-    outdoor_humidity_pct: float = 50.0,
+    outdoor_humidity: float = 50.0,
 ) -> dict:
-    """POST /control/rule-based — API Gateway 경유 Rule-based 냉각 제어."""
+    """POST /control/rule-based — Rule-based 냉각 제어."""
     return _post(
         f"{API_URL}/control/rule-based",
-        _build_control_payload(outdoor_temp_c, it_power_kw, outdoor_humidity_pct),
+        _build_control_payload(outdoor_temp_c, it_power_kw, outdoor_humidity),
     )
 
 
 def rl_control(
     outdoor_temp_c: float,
     it_power_kw: float,
-    outdoor_humidity_pct: float = 50.0,
+    outdoor_humidity: float = 50.0,
+    *,
+    zone_temp_c: float,
+    supply_setpoint_c: float,
+    cpu_utilization: float,
+    outdoor_temp_trend_c_per_s: float = 0.0,
+    timestamp: str | None = None,
 ) -> dict:
-    """POST /control/rl — API Gateway 경유 RL 에이전트 제어.
+    """POST /control/rl — 효율 우선 best 모델 추론.
 
-    TODO(RL): 현재 Control Service가 고정값을 반환 중:
-        { cooling_mode: "hybrid", supply_air_temp_setpoint_c: 20.0,
-          free_cooling_ratio: 0.5, expected_pue: 1.35 }
-        Week 4 PPO/DQN RL 에이전트 구현 완료 후 실제 추론값으로 교체 (api_spec.md §2).
+    /control/rl은 zone_temp_c, supply_setpoint_c, cpu_utilization 필드를 반드시 요구한다.
+    누락 시 control_service가 HTTP 422를 반환하므로 caller가 모두 채워서 전달해야 함.
+
+    위기 시나리오(server_surge, 폭염 등)에서 안전 모델 자동 전환이 필요하면
+    rl_hybrid_control() 권장 — 응답 시그니처 동일.
     """
     return _post(
         f"{API_URL}/control/rl",
-        _build_control_payload(outdoor_temp_c, it_power_kw, outdoor_humidity_pct),
+        _build_control_payload(
+            outdoor_temp_c, it_power_kw, outdoor_humidity,
+            zone_temp_c=zone_temp_c,
+            supply_setpoint_c=supply_setpoint_c,
+            cpu_utilization=cpu_utilization,
+            outdoor_temp_trend_c_per_s=outdoor_temp_trend_c_per_s,
+            timestamp=timestamp,
+        ),
+    )
+
+
+def rl_hybrid_control(
+    outdoor_temp_c: float,
+    it_power_kw: float,
+    outdoor_humidity: float = 50.0,
+    *,
+    zone_temp_c: float,
+    supply_setpoint_c: float,
+    cpu_utilization: float,
+    outdoor_temp_trend_c_per_s: float = 0.0,
+    timestamp: str | None = None,
+) -> dict:
+    """POST /control/rl-hybrid — 부하/온도 위기 자동 감지 후 safety 모델 전환.
+
+    응답 시그니처는 rl_control()과 동일. 위기 시나리오 robustness 확보 시 우선 사용.
+    """
+    return _post(
+        f"{API_URL}/control/rl-hybrid",
+        _build_control_payload(
+            outdoor_temp_c, it_power_kw, outdoor_humidity,
+            zone_temp_c=zone_temp_c,
+            supply_setpoint_c=supply_setpoint_c,
+            cpu_utilization=cpu_utilization,
+            outdoor_temp_trend_c_per_s=outdoor_temp_trend_c_per_s,
+            timestamp=timestamp,
+        ),
     )
 
 

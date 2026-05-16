@@ -25,6 +25,7 @@ pg = st.navigation(
         st.Page("pages/1_운영_관리.py", title="운영 관리", icon=":material/tune:"),
         st.Page("pages/2_ESG_지표.py",  title="ESG 지표",  icon=":material/eco:"),
         st.Page("pages/3_분석_도구.py", title="분석 도구", icon=":material/analytics:"),
+        st.Page("pages/4_RL_vs_Rulebased.py", title="RL vs Rule-based", icon=":material/compare_arrows:"),
     ],
     position="sidebar",
 )

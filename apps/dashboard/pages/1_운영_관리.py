@@ -107,9 +107,10 @@ with col_ctrl:
                     f'</div>'
                 )
             mode_ko = COOLING_MODE_LABELS.get(result.get("cooling_mode", ""), result.get("cooling_mode", "-"))
-            temp    = result.get("supply_air_temp_setpoint_c", "-")
-            ratio   = f'{result.get("free_cooling_ratio", 0.0):.0%}'
-            metrics = [("냉각 모드", mode_ko), ("설정 온도", f"{temp}°C"), ("Free Cooling", ratio)]
+            temp_raw = result.get("supply_air_temp_setpoint_c")
+            temp_str = f"{temp_raw:.2f}°C" if isinstance(temp_raw, (int, float)) else "-"
+            ratio    = f'{result.get("free_cooling_ratio", 0.0):.0%}'
+            metrics  = [("냉각 모드", mode_ko), ("설정 온도", temp_str), ("Free Cooling", ratio)]
             cells = "".join(
                 f'<div>'
                 f'<div style="font-size:0.62rem;opacity:0.45;text-transform:uppercase;'
@@ -177,7 +178,7 @@ with col_alarm:
                 )
 
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("알람 초기화", use_container_width=True):
+        if st.button("알람 초기화", width="stretch"):
             st.session_state.alarms = []
             st.rerun()
 

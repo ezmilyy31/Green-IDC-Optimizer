@@ -55,18 +55,18 @@ with tab_anim:
         )
         st.session_state.anim_speed = ANIM_SPEED_OPTIONS[speed_label]
 
-    if ctrl2.button("▶ 재생", use_container_width=True,
+    if ctrl2.button("▶ 재생", width="stretch",
                     disabled=st.session_state.anim_running):
         st.session_state.anim_running = True
         st.session_state.anim_hour   = 0
         st.rerun()
 
-    if ctrl3.button("⏸ 정지", use_container_width=True,
+    if ctrl3.button("⏸ 정지", width="stretch",
                     disabled=not st.session_state.anim_running):
         st.session_state.anim_running = False
         st.rerun()
 
-    if ctrl4.button("⟲ 초기화", use_container_width=True):
+    if ctrl4.button("⟲ 초기화", width="stretch"):
         st.session_state.anim_running = False
         st.session_state.anim_hour   = 0
         st.rerun()
