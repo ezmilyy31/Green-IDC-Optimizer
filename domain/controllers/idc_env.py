@@ -345,7 +345,8 @@ def simulate_summary(
             setpoint = inference.predict(obs)
         else:
             outdoor_temp = float(obs[1])
-            mode = decide_cooling_mode(outdoor_temp)
+            humidity = float(obs[3])
+            mode = decide_cooling_mode(outdoor_temp, humidity)
             setpoint = calculate_setpoint(mode, outdoor_temp)
 
         obs, _, term, trunc, info = env.step(np.array([setpoint], dtype=np.float32))
