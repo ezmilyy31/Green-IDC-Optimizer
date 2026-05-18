@@ -11,6 +11,12 @@ services:
       - forecast-service
       - control-service
       - simulation-service
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     volumes:
       - ./data:/app/data
 
@@ -80,6 +86,7 @@ services:
       - CONTROL_SERVICE_URL=http://control-service:8002
       - FORECAST_SERVICE_URL=http://forecast-service:8001
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     volumes:
       - ./data:/app/data

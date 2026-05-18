@@ -14,7 +14,8 @@ SIMULATION_URL = os.getenv("SIMULATION_SERVICE_URL", "http://localhost:8003")
 CONTROL_URL    = os.getenv("CONTROL_SERVICE_URL",    "http://localhost:8002")
 FORECAST_URL   = os.getenv("FORECAST_SERVICE_URL",   "http://localhost:8001")
 
-_TIMEOUT = 3  # seconds
+_TIMEOUT = 3        # seconds — 일반 엔드포인트
+_TIMEOUT_SLOW = 15  # seconds — LightGBM 추론 등 느린 엔드포인트
 
 
 def _get(url: str) -> dict:
@@ -26,9 +27,9 @@ def _get(url: str) -> dict:
         return {"error": str(e)}
 
 
-def _post(url: str, payload: dict) -> dict:
+def _post(url: str, payload: dict, timeout: int = _TIMEOUT) -> dict:
     try:
-        resp = requests.post(url, json=payload, timeout=_TIMEOUT)
+        resp = requests.post(url, json=payload, timeout=timeout)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
@@ -211,6 +212,7 @@ def call_forecast(
             "include_prediction_interval": include_prediction_interval,
             "model_type": model_type,
         },
+        timeout=_TIMEOUT_SLOW,
     )
 
 
