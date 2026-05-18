@@ -1,17 +1,10 @@
 """IDCEnv 기반 SAC 모델 추론 — control_service / 대시보드 / 시뮬레이션 연동용.
 
-여러 모델을 동시 로드하기 위해 path-key 기반 캐시를 사용한다 (multi-model singleton).
-- best 모델     : settings.rl_model_path        (효율 우선, /control/rl 엔드포인트)
-- safety 모델   : settings.rl_safety_model_path (안전 우선, /control/rl-hybrid 엔드포인트)
+path-key 기반 캐시로 여러 모델을 동시 로드할 수 있으나, 현재는 best 단독 운용.
 
-위기 시나리오 OOD 상황에서 catastrophic 실패를 막기 위해, predict() 결과에 zone temp
-기반 safe fallback을 적용한다. predict_hybrid()는 부하/온도 신호 기반으로 두 모델을
-자동 전환하며, safe fallback은 그 위 layer로 동작한다.
-
-다층 안전 시스템 (predict_hybrid + safe fallback):
-  Layer 1 (효율): best 모델     — 정상 부하 + zone < 26.0°C
-  Layer 2 (안전): safety 모델   — 부하 위기 OR 26.0 ≤ zone < 26.5°C
-  Layer 3 (강제 cap): T_SUPPLY_MIN — zone ≥ 26.5°C (predict() 내부 safe fallback)
+2-tier 안전 시스템 (predict_best):
+  Tier 1 (효율): best 모델 RL 정책
+  Tier 2 (강제 cap): safe fallback — zone > 26.5°C 시 T_SUPPLY_MIN, zone < 19.0°C 시 T_SUPPLY_MAX
 """
 
 from pathlib import Path
@@ -33,13 +26,6 @@ from domain.controllers.idc_env import (
 # Safe fallback 임계값: zone temp 위반 한계에서 여유를 두고 오버라이드 작동
 SAFE_HIGH_C = T_ZONE_UPPER - 0.5  # 26.5°C: 한계 직전에 강력 냉각
 SAFE_LOW_C = T_ZONE_LOWER + 1.0   # 19.0°C: 한계 직전에 냉각 완화
-
-# Hybrid switch 임계 — 실측 데이터 분포 기반 (eval_crisis.py와 동일):
-#   normal:       cpu mean=0.40 max=0.52, it_power mean=144 max=161
-#   server_surge: cpu mean=0.52 max=0.67, it_power mean=161 max=183
-HYBRID_SWITCH_C = 27.0          # zone temp 임계 (사후 신호)
-HYBRID_CPU_THRESH = 0.55        # cpu_util 임계 (사전 신호) — normal max 0.52보다 위로 올려 누적 손해 최소화
-HYBRID_IT_POWER_THRESH = 170.0  # it_power 임계 (사전 신호) — normal max 161보다 위, surge max 183 아래
 
 # IDCEnv obs 인덱스
 ZONE_TEMP_OBS_INDEX = 5
@@ -117,43 +103,3 @@ def predict_best(obs: np.ndarray, model_path: Optional[str] = None) -> float:
     return RLInference.get(model_path).predict(obs)
 
 
-def predict_hybrid(
-    obs: np.ndarray,
-    efficient_path: Optional[str] = None,
-    safety_path: Optional[str] = None,
-    switch_c: float = HYBRID_SWITCH_C,
-    cpu_thresh: float = HYBRID_CPU_THRESH,
-    it_power_thresh: float = HYBRID_IT_POWER_THRESH,
-) -> float:
-    """다중 신호 기반 best/safety 자동 전환 + safe fallback.
-
-    세 가지 신호 중 하나라도 위기로 판정되면 safety 모델 사용:
-      - 부하 신호 (사전): cpu_util > cpu_thresh
-      - 부하 신호 (사전): it_power > it_power_thresh
-      - 온도 신호 (사후): zone_temp >= switch_c
-
-    각 모델의 predict() 내부에 safe fallback이 이미 적용되어, 선택된 모델 결과가
-    그대로 반환되어도 zone temp 한계(26.5°C 초과)에서는 T_SUPPLY_MIN 강제.
-
-    Args:
-        obs: IDCEnv 9-dim 관측 벡터
-        efficient_path: best 모델 경로. None이면 settings.rl_model_path.
-        safety_path: safety 모델 경로. None이면 settings.rl_safety_model_path.
-        switch_c, cpu_thresh, it_power_thresh: 임계값 override.
-
-    Returns:
-        supply_temp_setpoint (°C, T_SUPPLY_MIN ~ T_SUPPLY_MAX)
-    """
-    cpu_util = float(obs[CPU_UTIL_OBS_INDEX])
-    it_power = float(obs[IT_POWER_OBS_INDEX])
-    zone_temp = float(obs[ZONE_TEMP_OBS_INDEX])
-
-    is_load_crisis = cpu_util > cpu_thresh or it_power > it_power_thresh
-    is_temp_warning = zone_temp >= switch_c
-
-    if is_load_crisis or is_temp_warning:
-        path = safety_path or settings.rl_safety_model_path
-    else:
-        path = efficient_path or settings.rl_model_path
-
-    return RLInference.get(path).predict(obs)

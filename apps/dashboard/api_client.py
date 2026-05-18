@@ -141,44 +141,13 @@ def rl_control(
     outdoor_temp_trend_c_per_s: float = 0.0,
     timestamp: str | None = None,
 ) -> dict:
-    """POST /control/rl — 효율 우선 best 모델 추론.
+    """POST /control/rl — 효율 우선 best 모델 추론 + safe fallback.
 
-    /control/rl은 zone_temp_c, supply_setpoint_c, cpu_utilization 필드를 반드시 요구한다.
+    zone_temp_c, supply_setpoint_c, cpu_utilization 필드를 반드시 요구한다.
     누락 시 control_service가 HTTP 422를 반환하므로 caller가 모두 채워서 전달해야 함.
-
-    위기 시나리오(server_surge, 폭염 등)에서 안전 모델 자동 전환이 필요하면
-    rl_hybrid_control() 권장 — 응답 시그니처 동일.
     """
     return _post(
         f"{API_URL}/control/rl",
-        _build_control_payload(
-            outdoor_temp_c, it_power_kw, outdoor_humidity,
-            zone_temp_c=zone_temp_c,
-            supply_setpoint_c=supply_setpoint_c,
-            cpu_utilization=cpu_utilization,
-            outdoor_temp_trend_c_per_s=outdoor_temp_trend_c_per_s,
-            timestamp=timestamp,
-        ),
-    )
-
-
-def rl_hybrid_control(
-    outdoor_temp_c: float,
-    it_power_kw: float,
-    outdoor_humidity: float = 50.0,
-    *,
-    zone_temp_c: float,
-    supply_setpoint_c: float,
-    cpu_utilization: float,
-    outdoor_temp_trend_c_per_s: float = 0.0,
-    timestamp: str | None = None,
-) -> dict:
-    """POST /control/rl-hybrid — 부하/온도 위기 자동 감지 후 safety 모델 전환.
-
-    응답 시그니처는 rl_control()과 동일. 위기 시나리오 robustness 확보 시 우선 사용.
-    """
-    return _post(
-        f"{API_URL}/control/rl-hybrid",
         _build_control_payload(
             outdoor_temp_c, it_power_kw, outdoor_humidity,
             zone_temp_c=zone_temp_c,

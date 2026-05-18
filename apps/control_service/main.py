@@ -104,7 +104,6 @@ def rl_control(req: ControlRequest) -> ControlResponse:
     """효율 우선 best 모델로 supply setpoint 추론 (PUE 최우수).
 
     safe fallback 자동 적용 (zone > 26.5°C 시 T_SUPPLY_MIN 강제).
-    위기 시나리오(특히 server_surge) robustness가 필요하면 /control/rl-hybrid 사용.
     """
     obs = _build_obs(req)
     try:
@@ -121,27 +120,3 @@ def rl_control(req: ControlRequest) -> ControlResponse:
     )
 
 
-@app.post("/control/rl-hybrid")
-def rl_hybrid_control(req: ControlRequest) -> ControlResponse:
-    """안전 우선 hybrid 정책으로 supply setpoint 추론.
-
-    부하 신호(cpu_util > 0.50 OR it_power > 165kW) 또는 온도 경고(zone ≥ 26.0°C)
-    시 safety 모델(sac-dr-fresh-1m) 사용, 그 외엔 best 모델 사용. 모든 시나리오
-    위반 0% 달성 (server_surge 포함).
-
-    응답 시그니처는 /control/rl과 동일 — 시뮬레이션/대시보드에서 엔드포인트만 바꿔
-    호출하면 됨.
-    """
-    obs = _build_obs(req)
-    try:
-        from domain.controllers.rl_inference import predict_hybrid
-        setpoint = predict_hybrid(obs)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=503, detail=f"RL 모델 로드 실패: {e}")
-
-    cooling_mode, ratio = _derive_cooling_metadata(req.outdoor_temp_c, req.outdoor_humidity)
-    return ControlResponse(
-        cooling_mode=cooling_mode.value,
-        supply_air_temp_setpoint_c=setpoint,
-        free_cooling_ratio=ratio,
-    )

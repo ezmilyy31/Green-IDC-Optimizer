@@ -179,40 +179,6 @@ def _make_rl_best_http_controller():
     return controller
 
 
-def _make_rl_hybrid_http_controller():
-    """control-service /control/rl-hybrid 호출 wrapper.
-
-    위기 신호(부하/온도) 감지 시 control_service가 safety 모델로 자동 전환 →
-    server_surge·폭염 등 OOD 상황에서도 0% 위반 달성.
-    실패 시 local predict_hybrid()로 fallback.
-    """
-    from apps.dashboard.api_client import rl_hybrid_control
-    failures = {"count": 0}
-
-    def _local_predict(obs: np.ndarray) -> float:
-        from domain.controllers.rl_inference import predict_hybrid
-        return float(predict_hybrid(obs))
-
-    def controller(obs: np.ndarray) -> float:
-        if failures["count"] >= 3:
-            return _local_predict(obs)
-        p = _obs_to_payload(obs)
-        result = rl_hybrid_control(
-            outdoor_temp_c=p["outdoor_temp_c"],
-            it_power_kw=p["it_power_kw"],
-            outdoor_humidity=p["outdoor_humidity"],
-            zone_temp_c=p["zone_temp_c"],
-            supply_setpoint_c=p["supply_setpoint_c"],
-            cpu_utilization=p["cpu_utilization"],
-            outdoor_temp_trend_c_per_s=p["outdoor_temp_trend_c_per_s"],
-        )
-        if "error" in result:
-            failures["count"] += 1
-            return _local_predict(obs)
-        return float(result["supply_air_temp_setpoint_c"])
-    return controller
-
-
 def _build_env(scenario: ScenarioPreset) -> IDCEnv:
     """시나리오 시작 idx로 고정된 IDCEnv 인스턴스 생성."""
     env = IDCEnv(max_episode_steps=scenario.n_steps)
@@ -270,29 +236,23 @@ def _run_episode(env: IDCEnv, controller, n_steps: int) -> pd.DataFrame:
 
 
 def simulate_compare(scenario: ScenarioPreset) -> dict:
-    """시나리오에 대해 세 컨트롤러(Rule / RL Best / RL Hybrid)를 돌리고 결과를 반환.
+    """시나리오에 대해 두 컨트롤러(Rule / RL Best)를 돌리고 결과를 반환.
 
     - Rule-based: 외기 wet-bulb로 3단 setpoint 결정 (22/20/18°C)
-    - RL Best: sac-wetbulb-1m 단독, PUE 최적화
-    - RL Hybrid: 위기 신호 감지 시 safety 모델(sac-dr-fresh-1m) 자동 전환
+    - RL Best: sac-wetbulb-1m 단독, PUE 최적화 + safe fallback
     """
     rule_env = _build_env(scenario)
     df_rule = _run_episode(rule_env, _make_rule_based_http_controller(), scenario.n_steps)
 
     rl_loaded = False
     df_best = None
-    df_hybrid = None
     try:
         best_env = _build_env(scenario)
         df_best = _run_episode(best_env, _make_rl_best_http_controller(), scenario.n_steps)
-        hybrid_env = _build_env(scenario)
-        df_hybrid = _run_episode(hybrid_env, _make_rl_hybrid_http_controller(), scenario.n_steps)
         rl_loaded = True
     except Exception as exc:
-        # RL 호출 완전 실패 시 rule-based로 모두 채워서 UI 안정성 유지
         print(f"[playback] RL 시뮬레이션 실패 → rule-only 모드: {exc}")
         df_best = df_rule.copy()
-        df_hybrid = df_rule.copy()
 
     def _summary(df: pd.DataFrame, label: str) -> dict:
         total = float(df["누적 kWh"].iloc[-1])
@@ -315,12 +275,10 @@ def simulate_compare(scenario: ScenarioPreset) -> dict:
         "rl_loaded":      rl_loaded,
     }
     summary.update(_summary(df_best, "best"))
-    summary.update(_summary(df_hybrid, "hybrid"))
 
     return {
         "rule":     df_rule,
         "best":     df_best,
-        "hybrid":   df_hybrid,
         "scenario": scenario,
         "summary":  summary,
     }
