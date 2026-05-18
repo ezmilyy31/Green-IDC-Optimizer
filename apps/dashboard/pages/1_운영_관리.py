@@ -21,6 +21,8 @@ from apps.dashboard.constants import (
     CLR_IT,
     COOLING_MODE_LABELS,
     CRISIS_STRATEGIES,
+    DEFAULT_HUMIDITY_PCT,
+    TEMP_WARNING_THRESHOLD_C,
 )
 from core.config.constants import WET_BULB_FREE_THRESHOLD_C
 from domain.thermodynamics.chiller import calculate_wet_bulb_c
@@ -134,9 +136,10 @@ st.divider()
 
 mode_label   = COOLING_MODE_LABELS.get(d["current_mode"], d["current_mode"])
 # 습구 온도 기반 자유공조 가용 판정 (환경 칠러 모델과 동일 기준)
-# 대시보드 시뮬은 습도 미추적 → 한국 평균 60% 가정
-_humidity_assumption = 60.0
-_wet_bulb = calculate_wet_bulb_c(d["current_outdoor"], _humidity_assumption)
+# parquet 실측 습도(peak 시점) 사용 — sin 폴백 시 DEFAULT_HUMIDITY_PCT
+_df_peak = d["df"]
+_humidity = float(_df_peak.loc[d["peak_idx"], "외기 습도 (%)"]) if "외기 습도 (%)" in _df_peak.columns else DEFAULT_HUMIDITY_PCT
+_wet_bulb = calculate_wet_bulb_c(d["current_outdoor"], _humidity)
 free_cool_ok = _wet_bulb < WET_BULB_FREE_THRESHOLD_C
 
 # Free Cooling 상태 배지
@@ -172,12 +175,36 @@ with col_kpi:
 
 with col_ctrl:
     with st.container(border=True):
+        # 외기 기준 공통 메타데이터 — control_service가 wet-bulb로 결정 (모델 추천과 무관)
+        # Rule/RL 응답에 동일하게 들어오므로 둘 중 아무거나 사용. 둘 다 오프라인이면 fallback "-"
+        _meta_src = d["ctrl_rule"] if "error" not in d["ctrl_rule"] else d["ctrl_rl"]
+        if "error" not in _meta_src:
+            _meta_mode  = COOLING_MODE_LABELS.get(_meta_src.get("cooling_mode", ""), "-")
+            _meta_ratio = f'{_meta_src.get("free_cooling_ratio", 0.0):.0%}'
+        else:
+            _meta_mode  = "-"
+            _meta_ratio = "-"
+
         st.markdown(
             f'<p style="font-size:0.85rem;font-weight:700;opacity:0.7;'
             f'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">'
             f'제어 서비스 추천</p>'
-            f'<p style="font-size:0.82rem;opacity:0.55;margin-bottom:14px;">'
-            f'피크 기준 — 외기 {d["current_outdoor"]}°C / IT {d["peak_it_power"]:.0f} kW</p>',
+            f'<p style="font-size:0.82rem;opacity:0.55;margin-bottom:10px;">'
+            f'피크 기준 — 외기 {d["current_outdoor"]}°C / IT {d["peak_it_power"]:.0f} kW</p>'
+            # 외기 기준 메타데이터 띠 — 두 모델 공통값임을 시각적으로 분리
+            f'<div style="background:rgba(128,128,128,0.06);border-radius:8px;'
+            f'padding:8px 12px;margin-bottom:12px;display:flex;gap:18px;align-items:center;">'
+            f'<div style="font-size:0.62rem;opacity:0.55;text-transform:uppercase;'
+            f'letter-spacing:0.05em;font-weight:700;">외기 기준</div>'
+            f'<div style="display:flex;gap:14px;font-size:0.82rem;">'
+            f'<span><span style="opacity:0.55;">냉각모드</span> '
+            f'<b>{_meta_mode}</b></span>'
+            f'<span><span style="opacity:0.55;">Free Cooling</span> '
+            f'<b>{_meta_ratio}</b></span>'
+            f'</div>'
+            f'<div style="margin-left:auto;font-size:0.65rem;opacity:0.45;font-style:italic;">'
+            f'* wet-bulb 기준 라벨</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
@@ -204,30 +231,21 @@ with col_ctrl:
                     f'<div style="font-size:0.8rem;opacity:0.45;">서비스 연결 불가</div>'
                     f'</div>'
                 )
-            mode_ko = COOLING_MODE_LABELS.get(result.get("cooling_mode", ""), result.get("cooling_mode", "-"))
             temp_raw = result.get("supply_air_temp_setpoint_c")
             temp_str = f"{temp_raw:.2f}°C" if isinstance(temp_raw, (int, float)) else "-"
-            ratio    = f'{result.get("free_cooling_ratio", 0.0):.0%}'
-            metrics  = [("냉각 모드", mode_ko), ("설정 온도", temp_str), ("Free Cooling", ratio)]
-            cells = "".join(
-                f'<div>'
-                f'<div style="font-size:0.62rem;opacity:0.45;text-transform:uppercase;'
-                f'letter-spacing:0.04em;margin-bottom:4px;">{k}</div>'
-                f'<div style="font-size:0.95rem;font-weight:700;">{v}</div>'
-                f'</div>'
-                for k, v in metrics
-            )
+            # 모델이 실제로 결정하는 값은 supply setpoint — 크게 강조.
             return (
                 f'<div style="background:{accent}0d;border:1px solid {accent}33;'
                 f'border-radius:10px;padding:12px 14px;margin-bottom:10px;">'
-                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
                 f'<span style="font-size:0.78rem;font-weight:700;color:{accent};'
                 f'text-transform:uppercase;letter-spacing:0.05em;">{label}</span>'
                 f'<span style="margin-left:auto;">{online_dot}</span>'
                 f'</div>'
-                f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
-                f'{cells}'
-                f'</div>'
+                f'<div style="font-size:0.62rem;opacity:0.45;text-transform:uppercase;'
+                f'letter-spacing:0.04em;margin-bottom:2px;">추천 공급 온도</div>'
+                f'<div style="font-size:1.5rem;font-weight:800;color:{accent};line-height:1.1;">'
+                f'{temp_str}</div>'
                 f'</div>'
             )
 
@@ -409,8 +427,8 @@ else:
                 x=hours, y=df["환기 온도 (°C)"],
                 name="위기", line=dict(color=CLR_DANGER, width=2),
             ))
-            fig4.add_hline(y=27.0, line_dash="dash", line_color="red",
-                           annotation_text="경고 27°C")
+            fig4.add_hline(y=TEMP_WARNING_THRESHOLD_C, line_dash="dash", line_color="red",
+                           annotation_text=f"경고 {TEMP_WARNING_THRESHOLD_C:.0f}°C")
             fig4.update_layout(
                 title="환기 온도 (°C)", height=280,
                 margin=dict(t=40, b=50, l=10, r=10),

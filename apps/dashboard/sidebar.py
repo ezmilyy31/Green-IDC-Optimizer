@@ -23,6 +23,7 @@ from apps.dashboard.api_client import (
 )
 from apps.dashboard.constants import (
     CRISIS_CONFIGS,
+    DEFAULT_HUMIDITY_PCT,
     SCENARIO_TEMP_PROFILES,
     TEMP_WARNING_THRESHOLD_C,
 )
@@ -201,11 +202,12 @@ def render_sidebar() -> dict:
     peak_cpu_util  = df.loc[peak_idx, "CPU 사용률 (%)"] / 100.0
     peak_return_temp_c = df.loc[peak_idx, "환기 온도 (°C)"]
     peak_zone_temp = max(supply_temp, peak_return_temp_c - 2.0)
+    # parquet 실측 습도 사용 — sin 폴백 경로에서만 DEFAULT_HUMIDITY_PCT가 들어옴.
+    peak_humidity  = float(df.loc[peak_idx, "외기 습도 (%)"]) if "외기 습도 (%)" in df.columns else DEFAULT_HUMIDITY_PCT
     # RL은 hybrid 정책 — 위기(부하/온도) 자동 감지 후 safety 모델로 전환.
-    # 위기 시나리오 토글 시 RL이 더 보수적인 setpoint를 내놓는 모습이 보임.
-    ctrl_rule = optimize_control(current_outdoor, peak_it_power, outdoor_humidity=60.0)
+    ctrl_rule = optimize_control(current_outdoor, peak_it_power, outdoor_humidity=peak_humidity)
     ctrl_rl   = rl_hybrid_control(
-        current_outdoor, peak_it_power, outdoor_humidity=60.0,
+        current_outdoor, peak_it_power, outdoor_humidity=peak_humidity,
         zone_temp_c=peak_zone_temp,
         supply_setpoint_c=supply_temp,
         cpu_utilization=peak_cpu_util,
