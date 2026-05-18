@@ -33,7 +33,7 @@ STEP_MINUTES = 5
 
 IT_TARGET_COL = "it_power_kw"
 COOLING_TARGET_COL = "chiller_power_kw" 
-DATA_PATH = "./data/processed/synthetic_idc_1year.parquet"
+DATA_PATH = "./data/weather/synthetic_idc_1year_noisy.parquet"
 
 # =========================================================
 # Public entrypoint

@@ -19,7 +19,7 @@ uv run python -m domain.forecasting.train.train_lgbm_quantile_cooling_demand
 # =========================================================
 # 1. 데이터 로드 및 Feature Engineering
 # =========================================================
-data_path = "data/processed/synthetic_idc_1year.parquet"
+data_path = "data/weather/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "chiller_power_kw" 
 
 if not Path(data_path).exists():

@@ -1,6 +1,9 @@
+import json
+from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
-from pathlib import Path
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from domain.forecasting.lgbm_model import LGBMForecaster
@@ -21,7 +24,7 @@ uv run python -m domain.forecasting.train.train_lgbm_it_load
 # 1. 데이터 로드 및 Feature Engineering
 # =========================================================
 
-data_path = "data/processed/synthetic_idc_1year_noisy.parquet"
+data_path = "data/weather/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "it_power_kw" 
 
 if not Path(data_path).exists():
@@ -125,6 +128,27 @@ print("-" * 73)
 print(f"연간 평균 MAE       : {np.mean(total_mae):.2f} kW")
 print(f"연간 평균 MAPE(24h) : {np.mean(total_mape_24h):.2f} %  (요구사항: 5% 이내)")
 print(f"연간 평균 MAPE(168h): {np.mean(total_mape_168h):.2f} %  (요구사항: 8% 이내)\n")
+
+# CV 결과를 JSON으로 저장 — 대시보드 KPI는 누수 없는 이 값을 우선 사용한다.
+eval_dir = Path("data/eval")
+eval_dir.mkdir(parents=True, exist_ok=True)
+(eval_dir / "cv_lgbm_it_load.json").write_text(json.dumps({
+    "generated_at":  datetime.utcnow().isoformat() + "Z",
+    "model":         "lgbm_it_load",
+    "method":        "monthly_cv",
+    "n_months":      len(monthly_results),
+    "mae_kw":        round(float(np.mean(total_mae)), 4),
+    "mape_24h_pct":  round(float(np.mean(total_mape_24h)), 4),
+    "mape_168h_pct": round(float(np.mean(total_mape_168h)), 4),
+    "spec_24h_pct":  5.0,
+    "spec_168h_pct": 8.0,
+    "monthly": [
+        {"month": m, "mae_kw": round(mae, 4),
+         "mape_24h_pct": round(m24, 4), "mape_168h_pct": round(m168, 4)}
+        for m, mae, _all, m24, m168 in monthly_results
+    ],
+}, indent=2, ensure_ascii=False))
+print(f"[eval] CV 결과 저장: {eval_dir / 'cv_lgbm_it_load.json'}")
 
 
 # =========================================================

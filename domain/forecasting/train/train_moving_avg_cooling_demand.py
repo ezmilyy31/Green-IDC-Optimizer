@@ -20,7 +20,7 @@ MAPE 대신 명세서 요구사항 지표인 nMAE(Normalized MAE)를 주 지표�
 uv run python -m domain.forecasting.train.train_moving_avg_cooling_demand
 """
 
-DATA_PATH = "data/processed/synthetic_idc_1year_noisy.parquet"
+DATA_PATH = "data/weather/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "chiller_power_kw"
 TIMESTAMP_COL = "timestamp"
 

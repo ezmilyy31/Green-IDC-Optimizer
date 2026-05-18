@@ -1,6 +1,9 @@
+import json
+from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
-from pathlib import Path
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from domain.forecasting.lgbm_model import LGBMForecaster
@@ -16,7 +19,7 @@ uv run python -m domain.forecasting.train.train_lgbm_cooling_demand
 # =========================================================
 # 1. 데이터 로드 및 Feature Engineering
 # =========================================================
-data_path = "data/processed/synthetic_idc_1year_noisy.parquet"
+data_path = "data/weather/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "chiller_power_kw" 
 
 if not Path(data_path).exists():
@@ -141,6 +144,28 @@ print(f"연간 평균 MAE : {np.mean(total_mae):.2f} kW")
 if valid_nmae_list:
     print(f"유효 nMAE 평균 : {np.mean(valid_nmae_list):.2f} % (프리쿨링 월 제외)")
 print()
+
+# CV 결과를 JSON으로 저장 — 프리쿨링 월(칠러 평균 ~0kW) 제외한 유효 nMAE만 KPI로 사용
+eval_dir = Path("data/eval")
+eval_dir.mkdir(parents=True, exist_ok=True)
+(eval_dir / "cv_lgbm_cooling_demand.json").write_text(json.dumps({
+    "generated_at":  datetime.utcnow().isoformat() + "Z",
+    "model":         "lgbm_cooling_demand",
+    "method":        "monthly_cv",
+    "n_months":      len(monthly_results),
+    "n_valid_months": len(valid_nmae_list),
+    "mae_kw":        round(float(np.mean(total_mae)), 4),
+    "nmae_valid_pct": round(float(np.mean(valid_nmae_list)), 4) if valid_nmae_list else None,
+    "spec_nmae_pct": 10.0,
+    "monthly": [
+        {"month": m, "mae_kw": round(mae, 4),
+         "nmae_pct": round(nmae, 4),
+         "mape_nonzero_pct": round(mape_nz, 4),
+         "free_cooling_ratio": round(float((yt < 1.0).mean()), 4)}
+        for m, mae, nmae, mape_nz, yt in monthly_results
+    ],
+}, indent=2, ensure_ascii=False))
+print(f"[eval] CV 결과 저장: {eval_dir / 'cv_lgbm_cooling_demand.json'}")
 
 
 # =========================================================

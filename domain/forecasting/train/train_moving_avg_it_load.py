@@ -15,7 +15,7 @@ Simple MA / Seasonal MA 두 가지 모드를 모두 평가하고 비교한다.
 uv run python -m domain.forecasting.train.train_moving_avg_it_load
 """
 
-DATA_PATH = "data/processed/synthetic_idc_1year_noisy.parquet"
+DATA_PATH = "data/weather/synthetic_idc_1year_noisy.parquet"
 TARGET_COL = "it_power_kw"
 TIMESTAMP_COL = "timestamp"
 
@@ -121,3 +121,22 @@ for r in [simple_result, seasonal_result]:
     print(f"{r['label']:<40} {r['mape_24h']:>13.2f}% {r['mape_168h']:>13.2f}%")
 print()
 print("※ LGBM 결과와 비교하려면 train_lgbm_it_load.py 결과를 참고하세요.")
+
+
+# =========================================================
+# 5. 최종 모델 저장 (전체 데이터로 재학습)
+# =========================================================
+best = (
+    seasonal_model
+    if seasonal_result["mape_24h"] <= simple_result["mape_24h"]
+    else simple_model
+)
+best_label = "Seasonal MA" if seasonal_result["mape_24h"] <= simple_result["mape_24h"] else "Simple MA"
+
+best.fit(train_df=df)
+
+save_dir = Path("data/models")
+save_dir.mkdir(parents=True, exist_ok=True)
+model_path = save_dir / "it_load_moving_avg.joblib"
+best.save(str(model_path))
+print(f"최종 저장 모델: {best_label} → {model_path}")

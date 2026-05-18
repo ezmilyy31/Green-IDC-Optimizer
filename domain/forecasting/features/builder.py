@@ -4,11 +4,16 @@ import numpy as np
 from datetime import timedelta
 from typing import Any
 
-from core.config.constants import FREE_COOLING_THRESHOLD_C
+from core.config.constants import FREE_COOLING_THRESHOLD_C, WORKLOAD_PROFILE
 
 from domain.thermodynamics.cooling_load import calculate_cooling_load_from_it_power_kw
 from domain.thermodynamics.free_cooling import calculate_free_cooling_efficiency
 from domain.thermodynamics.chiller import calculate_cop
+
+# 시간대별 워크로드 비율 평균 — 0~23시 합 ÷ 24h 를 1.0으로 정규화한 배율.
+# WORKLOAD_PROFILE 자체의 평균이 ~0.62 이므로, 정규화하면 각 시간의 상대 강도가 됨.
+_WORKLOAD_MEAN = sum(WORKLOAD_PROFILE) / len(WORKLOAD_PROFILE)
+_WORKLOAD_RATIO_BY_HOUR = [v / _WORKLOAD_MEAN for v in WORKLOAD_PROFILE]
 
 """
 Feature Engineering 모듈
@@ -103,6 +108,17 @@ def _last_or_default(history_df: pd.DataFrame, col: str, default: Any) -> Any:
     return series.iloc[-1]
 
 
+def _last_value_with_ts(history_df: pd.DataFrame, col: str) -> tuple[Any, pd.Timestamp | None]:
+    """col 컬럼의 마지막 non-null 값과 해당 timestamp를 함께 반환."""
+    if col not in history_df.columns or history_df.empty:
+        return None, None
+    sub = history_df[["timestamp", col]].dropna(subset=[col])
+    if sub.empty:
+        return None, None
+    last = sub.iloc[-1]
+    return last[col], pd.Timestamp(last["timestamp"])
+
+
 # =========================================================
 # 2. [추론용] 실시간 단일 Row 생성 (Online Feature Engineering)
 # =========================================================
@@ -160,6 +176,20 @@ def _build_next_feature_row(
     row.setdefault("outdoor_temp_c", _last_or_default(simulated_history, "outdoor_temp_c", defaults.get("outdoor_temp_c", 20.0)))
     row.setdefault("outdoor_humidity", _last_or_default(simulated_history, "outdoor_humidity", defaults.get("outdoor_humidity", 50.0)))
     row.setdefault("outdoor_wind_speed", _last_or_default(simulated_history, "outdoor_wind_speed", defaults.get("outdoor_wind_speed", 0.0)))
+
+    # cpu_utilization을 시간대 평균 패턴으로 주입 — autoregressive lag만으로는 평탄해지는 문제 해결.
+    # 마지막 실측 시점의 (값, 시각)을 기준으로 (목표시간대 비율 / 기준시간대 비율) 을 곱해
+    # 일변동(야간 저부하 → 오전 상승 → 오후 피크 → 야간 하강)이 복원되도록 한다.
+    if "cpu_utilization" not in row:
+        last_cpu, last_ts = _last_value_with_ts(simulated_history, "cpu_utilization")
+        if last_cpu is None:
+            last_cpu = 0.5
+            base_hour = next_ts.hour
+        else:
+            base_hour = pd.Timestamp(last_ts).hour
+        ratio_now  = _WORKLOAD_RATIO_BY_HOUR[next_ts.hour]
+        ratio_base = _WORKLOAD_RATIO_BY_HOUR[base_hour]
+        row["cpu_utilization"] = float(np.clip(float(last_cpu) * ratio_now / max(ratio_base, 0.01), 0.05, 1.0))
 
     row.setdefault("free_cooling_available", row["outdoor_temp_c"] <= FREE_COOLING_THRESHOLD_C)
     row.setdefault("cooling_degree_days", max(float(row["outdoor_temp_c"]) - 18.0, 0.0))
@@ -325,14 +355,14 @@ def build_train_features(df: pd.DataFrame, target_col: str = IT_TARGET_COL) -> p
     # 3. 프리쿨링 효율 (free_cooling.py의 calculate_free_cooling_efficiency 로직 벡터화)
     temp_eff = np.where(
         df['outdoor_temp_c'] < FREE_COOLING_THRESHOLD_C, 1.0,
-        np.where(df['outdoor_temp_c'] < 22.0, 
-                 1.0 - (df['outdoor_temp_c'] - FREE_COOLING_THRESHOLD_C) / (22.0 - FREE_COOLING_THRESHOLD_C), 
+        np.where(df['outdoor_temp_c'] < 22.0,
+                 1.0 - (df['outdoor_temp_c'] - FREE_COOLING_THRESHOLD_C) / (22.0 - FREE_COOLING_THRESHOLD_C),
                  0.0)
     )
-    
+
     hum_factor = 1.0 - ((df['outdoor_humidity'] - 50.0) / 500.0).clip(lower=0.0)
     margin_factor = (1.0 + (18.0 - df['outdoor_temp_c']) * 0.02).clip(lower=0.8, upper=1.0)
-    
+
     df['free_cooling_efficiency'] = (temp_eff * hum_factor * margin_factor).clip(lower=0.0, upper=1.0)
     # ------------------------------------------------
     

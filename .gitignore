@@ -17,6 +17,7 @@ data/interim/
 data/processed/
 data/models/
 data/cache/
+data/eval/
 
 .DS_Store
 .idea/
