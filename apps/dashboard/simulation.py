@@ -31,6 +31,17 @@ _SEASON_START: dict[str, str] = {
     "겨울 (Winter)":         "2019-01-15 00:00:00",
 }
 
+
+def get_scenario_timestamp(scenario_name: str) -> str:
+    """시즌 시나리오의 시작 timestamp를 ISO 8601 문자열로 반환.
+
+    forecast API의 current_timestamp 파라미터와 동기화하여
+    시즌 변경 시 예측 결과도 함께 갱신되도록 한다.
+    Pydantic datetime 파싱을 위해 ISO 표준(T 구분자) 형식 보장.
+    """
+    raw = _SEASON_START.get(scenario_name, _SEASON_START["여름 (Summer)"])
+    return pd.Timestamp(raw).isoformat()
+
 # parquet 분포의 cpu_utilization 평균 (정규화 기준)
 _PARQUET_UTIL_MEAN = 0.47
 # 사이드바 cpu_util 슬라이더 기본값 (이 값일 때 parquet util 그대로 사용)
@@ -104,9 +115,14 @@ def _compute_row(
 
     actual_chiller_power = chiller.chiller_power_kw * cfg["chiller_ratio"]
     fan_power_kw         = fc.fan_power_kw
-    cooling_power_kw     = actual_chiller_power + fan_power_kw
-
+    # 칠러 미충족분은 비상 백업 냉각(낮은 COP 가정)으로 보전.
+    # 이렇게 해야 chiller_failure 시 "전력 ↓ → PUE 개선" 역설이 사라지고
+    # 위기가 실제 영향(추가 전력·비용·탄소)으로 KPI에 반영된다.
+    EMERGENCY_COP = 2.0   # 정상 칠러 COP(4~6)의 절반 수준 가정
     unmet_cooling = cooling_load * (1.0 - cfg["chiller_ratio"])
+    emergency_chiller_kw = unmet_cooling / EMERGENCY_COP
+    cooling_power_kw = actual_chiller_power + fan_power_kw + emergency_chiller_kw
+
     delta_t       = cooling_load  / (m_air * AIR_SPECIFIC_HEAT_KJ_PER_KG_K)
     delta_t_unmet = unmet_cooling / (m_air * AIR_SPECIFIC_HEAT_KJ_PER_KG_K)
     return_temp   = supply_temp_c + delta_t + delta_t_unmet
