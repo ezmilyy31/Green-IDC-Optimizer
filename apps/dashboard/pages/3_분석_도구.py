@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from apps.dashboard.api_client import call_forecast
-from apps.dashboard.constants import CLR_CHILLER, CLR_IT
+from apps.dashboard.constants import CLR_CHILLER, CLR_IT, TEMP_WARNING_THRESHOLD_C
 from apps.dashboard.sidebar import render_sidebar
 
 d = render_sidebar()
@@ -387,18 +387,18 @@ with tab_3d:
     cmin_3d = supply_temp_3d - 1
     cmax_3d = max(supply_temp_3d + 18.0, hour_return_t + 5.0)
 
-    # 발산형 컬러 스케일 — supply_temp 부근은 흰색(=안전), 27°C 임계에서 노랑, 그 위는 빨강
+    # 발산형 컬러 스케일 — supply_temp 부근은 흰색(=안전), 경고 임계에서 노랑, 그 위는 빨강
     def _norm(t: float) -> float:
         return max(0.0, min(1.0, (t - cmin_3d) / (cmax_3d - cmin_3d)))
 
     supply_anchor = _norm(supply_temp_3d)
-    warn_anchor   = _norm(27.0)  # 안전 한계
+    warn_anchor   = _norm(TEMP_WARNING_THRESHOLD_C)  # 안전 한계
     colorscale_3d = [
         [0.0,                                 "#1e3a8a"],   # 매우 차가움 (deep blue)
         [max(0.001, supply_anchor - 0.04),    "#93c5fd"],   # cold
         [supply_anchor,                        "#f8fafc"],  # supply ≈ 흰색
         [min(0.999, supply_anchor + 0.04),    "#fef3c7"],   # 살짝 따뜻
-        [max(0.001, warn_anchor),              "#fbbf24"],  # 27°C 경고 (amber)
+        [max(0.001, warn_anchor),              "#fbbf24"],  # 경고 임계 (amber)
         [min(0.999, warn_anchor + 0.10),      "#ef4444"],   # 위반 (red)
         [1.0,                                 "#7f1d1d"],   # 최대 (dark crimson)
     ]
@@ -411,16 +411,16 @@ with tab_3d:
     st.plotly_chart(fig_3d, width="stretch")
 
     # 핫스팟 / 안전 알림
-    hot_count = int((data_3d > 27.0).sum())
+    hot_count = int((data_3d > TEMP_WARNING_THRESHOLD_C).sum())
     if hot_count:
         st.warning(
-            f"{hour_3d:02d}:00 — 27°C 초과 랙 **{hot_count}개** 감지. "
+            f"{hour_3d:02d}:00 — {TEMP_WARNING_THRESHOLD_C:.0f}°C 초과 랙 **{hot_count}개** 감지. "
             f"Supply {supply_temp_3d}°C / Return {hour_return_t:.1f}°C / ΔT {hour_return_t - supply_temp_3d:+.1f}°C.",
             icon=":material/local_fire_department:",
         )
     else:
         st.success(
-            f"{hour_3d:02d}:00 — 모든 랙 안전 영역 (≤ 27°C). "
+            f"{hour_3d:02d}:00 — 모든 랙 안전 영역 (≤ {TEMP_WARNING_THRESHOLD_C:.0f}°C). "
             f"ΔT {hour_return_t - supply_temp_3d:+.1f}°C, 평균 랙 온도 {data_3d.mean():.1f}°C.",
             icon=":material/check_circle:",
         )
@@ -436,7 +436,7 @@ with tab_3d:
         zone_data = data_3d[zone_i * ZONE_ROWS_3D : (zone_i + 1) * ZONE_ROWS_3D]
         cold_data = zone_data[0]                # Cold Aisle row
         hot_data  = zone_data[1] if ZONE_ROWS_3D > 1 else zone_data[0]
-        over      = int((zone_data > 27.0).sum())
+        over      = int((zone_data > TEMP_WARNING_THRESHOLD_C).sum())
         accent    = ZONE_ACCENTS_3D[zone_i]
         with col_ui:
             with st.container(border=True):

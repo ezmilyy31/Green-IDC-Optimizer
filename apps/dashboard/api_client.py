@@ -215,24 +215,9 @@ def call_forecast(
 
 
 # ── Simulation endpoints (서비스 구현 후 활성화) ──────────────────────────────
-# TODO(Simulation Service): 아래 두 함수는 Simulation Service FastAPI 서버 구현 후 활성화.
+# TODO(Simulation Service): Simulation Service FastAPI 서버 구현 후 활성화.
 #   현재 docker-compose.yml의 simulation-service command가 test_sinergym.py(일회성 스크립트)로
 #   설정되어 있어 헬스체크 항상 실패 — FastAPI 서버 실행 명령으로 교체 필요 (api_spec.md §5).
-
-def simulate_step(outdoor_temp: float, it_power_kw: float, supply_temp_setpoint: float = 18.0) -> dict:
-    """POST /simulate/step — Simulation Service 연동 예정 (api_spec.md §5).
-
-    TODO(Simulation Service): 서비스 구현 후 simulation.py의 단일 스텝 계산을 이 호출로 교체.
-    """
-    return _post(
-        f"{SIMULATION_URL}/simulate/step",
-        {
-            "outdoor_temp_c":         outdoor_temp,
-            "it_power_kw":            it_power_kw,
-            "supply_temp_setpoint_c": supply_temp_setpoint,
-        },
-    )
-
 
 def simulate_24h(
     scenario: str,

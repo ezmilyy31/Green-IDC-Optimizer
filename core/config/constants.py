@@ -39,6 +39,8 @@ GPU_SERVER_P_MAX_W = 1500.0        # GPU 서버 최대 전력 (W)
 # ESG 계수 나중에 쓴다면 ..
 # TODO(업데이트 필요): 한국에너지공단(KEA) 연도별 전력 배출계수 갱신 시 수정 — 현재 2023년 기준 0.459 tCO₂/MWh
 CARBON_FACTOR_TCO2_PER_MWH   = 0.459   # 한국 전력 탄소 배출계수
+# 동일 계수의 kgCO₂/kWh 표현 (tCO₂/MWh와 수치 동일: 1tCO₂/MWh = 1kgCO₂/kWh)
+CARBON_FACTOR_KG_PER_KWH     = CARBON_FACTOR_TCO2_PER_MWH
 # TODO(업데이트 필요): 산업용 전기요금 변경 시 수정 — 현재 120원/kWh (한전 산업용 갑 기준 임시값)
 ELECTRICITY_COST_KRW_PER_KWH = 120.0   # 산업용 전기요금 (원/kWh)
 
