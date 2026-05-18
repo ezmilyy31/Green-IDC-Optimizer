@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from apps.dashboard.constants import (
-    CARBON_FACTOR_TCO2_PER_MWH,
+    CARBON_FACTOR_KG_PER_KWH,
     CLR_CHILLER,
     CLR_DANGER,
     CLR_GOOD,
@@ -23,7 +23,6 @@ from apps.dashboard.constants import (
     NAVER_PUE_BENCHMARK,
     PUE_BENCHMARKS,
     PUE_GAUGE_STEPS,
-    TEMP_WARNING_THRESHOLD_C,
 )
 
 
@@ -51,23 +50,10 @@ def build_pue_gauge(avg_pue: float, title: str = "PUE (24h 평균)") -> go.Figur
     return fig
 
 
-def build_power_trend(
-    df: pd.DataFrame,
-    df_full: pd.DataFrame | None = None,
-    anim_hour: int | None = None,
-) -> go.Figure:
-    """전력 소비 추이. 애니메이션 모드면 df_full을 흐린 배경으로 표시."""
+def build_power_trend(df: pd.DataFrame) -> go.Figure:
+    """전력 소비 추이."""
     hours = list(range(len(df)))
     fig = go.Figure()
-
-    if df_full is not None and anim_hour is not None:
-        full_hours = list(range(24))
-        for col, color in [("IT 전력 (kW)", CLR_IT), ("총 전력 (kW)", CLR_TOTAL)]:
-            fig.add_trace(go.Scatter(
-                x=full_hours, y=df_full[col],
-                line=dict(color=color, width=1, dash="dot"),
-                opacity=0.2, showlegend=False, hoverinfo="skip",
-            ))
 
     fig.add_trace(go.Scatter(
         x=hours, y=df["IT 전력 (kW)"],
@@ -82,72 +68,12 @@ def build_power_trend(
         name="총 전력", line=dict(color=CLR_TOTAL, dash="dot", width=2),
     ))
 
-    if anim_hour is not None and len(hours) > 0:
-        fig.add_vline(
-            x=hours[-1], line_dash="solid", line_color="#E74C3C", line_width=2,
-            annotation_text=f"{hours[-1]:02d}:00", annotation_position="top right",
-        )
-
     fig.update_layout(
         title="전력 소비 추이 (kW)", height=300,
         margin=dict(t=40, b=70, l=10, r=10),
         xaxis=dict(title="시간 (h)", range=[-0.5, 23.5], dtick=4),
         yaxis_title="전력 (kW)",
         legend=dict(orientation="h", y=-0.32),
-    )
-    return fig
-
-
-def build_pue_trend(
-    df: pd.DataFrame,
-    df_full: pd.DataFrame | None = None,
-    anim_hour: int | None = None,
-) -> go.Figure:
-    hours = list(range(len(df)))
-    fig = go.Figure()
-
-    if df_full is not None and anim_hour is not None:
-        fig.add_trace(go.Scatter(
-            x=list(range(24)), y=df_full["PUE"],
-            line=dict(color=CLR_GOOD, width=1, dash="dot"),
-            opacity=0.2, showlegend=False, hoverinfo="skip",
-        ))
-
-    fig.add_trace(go.Scatter(
-        x=hours, y=df["PUE"],
-        line=dict(color=CLR_GOOD, width=2), mode="lines+markers",
-        showlegend=False,
-    ))
-    fig.add_hline(
-        y=NAVER_PUE_BENCHMARK, line_dash="dash", line_color="gray",
-        annotation_text=f"{NAVER_PUE_BENCHMARK} (NAVER)",
-    )
-
-    if anim_hour is not None and len(hours) > 0:
-        fig.add_vline(x=hours[-1], line_dash="solid", line_color="#E74C3C", line_width=2)
-
-    fig.update_layout(
-        height=320, margin=dict(t=20, b=50, l=10, r=10),
-        xaxis=dict(title="시간 (h)", range=[-0.5, 23.5]),
-        yaxis_title="PUE", showlegend=False,
-    )
-    return fig
-
-
-def build_rack_temp_chart(
-    labels: list, temps: list, colors: list,
-    y_min: float, y_max: float,
-) -> go.Figure:
-    fig = go.Figure(go.Bar(x=labels, y=temps, marker_color=colors))
-    fig.add_hline(
-        y=TEMP_WARNING_THRESHOLD_C, line_dash="dash", line_color="red",
-        annotation_text=f"경고 {TEMP_WARNING_THRESHOLD_C}°C",
-    )
-    fig.update_layout(
-        title="서버 온도 분포 (피크 시간)", height=300,
-        margin=dict(t=40, b=50, l=10, r=10),
-        xaxis_title="랙", yaxis_title="온도 (°C)",
-        yaxis=dict(range=[y_min, y_max]),
     )
     return fig
 
@@ -166,8 +92,9 @@ def build_cooling_donut(df: pd.DataFrame) -> go.Figure:
 
 
 def build_carbon_bar(df: pd.DataFrame) -> go.Figure:
+    # 평균 kW × kgCO₂/kWh = kgCO₂/h (시간당 평균 전력 × 배출계수)
     mode_carbon = df.groupby("냉각 모드").apply(
-        lambda g: g["총 전력 (kW)"].mean() * CARBON_FACTOR_TCO2_PER_MWH
+        lambda g: g["총 전력 (kW)"].mean() * CARBON_FACTOR_KG_PER_KWH
     ).reset_index()
     mode_carbon.columns = ["모드_key", "탄소(kgCO₂/h)"]
     mode_carbon["색상"] = mode_carbon["모드_key"].map(MODE_COLOR_MAP)
@@ -230,18 +157,3 @@ def render_pue_benchmarks(avg_pue: float | None = None) -> None:
         unsafe_allow_html=True,
     )
 
-
-def render_ctrl_recommendation(result: dict, label: str) -> None:
-    """제어 서비스 추천값을 렌더링한다. 오프라인이면 경고 표시."""
-    if "error" in result:
-        st.warning(f"{label}: 서비스 오프라인")
-    else:
-        mode_ko = COOLING_MODE_LABELS.get(result.get("cooling_mode", ""), result.get("cooling_mode", "-"))
-        ratio   = result.get("free_cooling_ratio", 0.0)
-        st.write(
-            f"**{label}** — 모드: `{mode_ko}` | "
-            f"설정 온도: `{result.get('supply_air_temp_setpoint_c', '-')}°C` | "
-            f"Free Cooling 비율: `{ratio:.0%}`"
-            # TODO(Simulation Service): expected_pue 필드가 현재 고정값 1.35를 반환 중이므로 표시 생략.
-            # Simulation Service 연동 후 f" | 예상 PUE: `{result.get('expected_pue', '-'):.3f}`" 추가.
-        )

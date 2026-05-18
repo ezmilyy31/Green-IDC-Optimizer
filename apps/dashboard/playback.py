@@ -13,6 +13,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from core.config.constants import (
+    CARBON_FACTOR_KG_PER_KWH,
+    ELECTRICITY_COST_KRW_PER_KWH,
+)
 from domain.controllers.idc_env import IDCEnv, EPISODE_STEPS
 from domain.controllers.rule_based import calculate_setpoint, decide_cooling_mode
 
@@ -20,13 +24,10 @@ from domain.controllers.rule_based import calculate_setpoint, decide_cooling_mod
 STEPS_PER_DAY = EPISODE_STEPS
 PARQUET_PATH = Path(__file__).resolve().parents[2] / "data" / "weather" / "synthetic_idc_1year_noisy.parquet"
 
-ELECTRICITY_COST_KRW_PER_KWH = 130.0
-CARBON_FACTOR_KG_PER_KWH = 0.4594  # kgCO2/kWh (한전 2023 기준 근사)
-
 # 디스크 캐시: 시나리오별 시뮬레이션 결과를 pickle로 보관 → 컨테이너 재시작에도 유지
 # 시나리오 fingerprint(start_idx, n_steps, cpu_boost, outdoor_offset_c)가 바뀌면 자동 재계산
 # 코드/모델 변경 시 강제 무효화하려면 CACHE_VERSION 숫자만 올리면 됨
-CACHE_VERSION = "v1"
+CACHE_VERSION = "v2"
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "playback"
 
 

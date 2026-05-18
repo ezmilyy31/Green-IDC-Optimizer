@@ -12,13 +12,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import plotly.graph_objects as go
 import streamlit as st
 
+from apps.dashboard.api_client import call_forecast
 from apps.dashboard.charts import build_cooling_donut
 from apps.dashboard.constants import (
+    CLR_CHILLER,
     CLR_DANGER,
     CLR_GOOD,
     CLR_IT,
     COOLING_MODE_LABELS,
     CRISIS_STRATEGIES,
+    DEFAULT_HUMIDITY_PCT,
+    TEMP_WARNING_THRESHOLD_C,
 )
 from core.config.constants import WET_BULB_FREE_THRESHOLD_C
 from domain.thermodynamics.chiller import calculate_wet_bulb_c
@@ -32,13 +36,110 @@ st.title(":material/tune: 운영 관리")
 st.caption("냉각 제어 현황 · 위기 시나리오 분석")
 st.divider()
 
+# ── Section 0: 사전알림 (Forecast 기반) ───────────────────────────────────
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _forecast_preview(horizon_hours: int = 6) -> dict:
+    """다음 N시간 IT 부하/냉각 수요 예측 — 운영 의사결정용 짧은 호라이즌."""
+    return call_forecast(horizon_hours=horizon_hours, include_prediction_interval=True, model_type="lgbm")
+
+
+fc = _forecast_preview(horizon_hours=6)
+fc_ok = "error" not in fc and fc.get("predictions")
+
+st.markdown(
+    '<span style="font-size:1.1rem;font-weight:700;">사전알림 — 다음 6시간 예측</span>',
+    unsafe_allow_html=True,
+)
+
+if not fc_ok:
+    st.info(
+        "Forecast Service 오프라인 — 사전알림을 표시할 수 없습니다. "
+        "서비스 연결 후 자동으로 다음 6시간 IT 부하 / 냉각 수요 예측이 표시됩니다.",
+        icon=":material/info:",
+    )
+else:
+    preds = fc["predictions"]
+    cur_it   = d["peak_it_power"]  # 현재 피크 IT 부하 (참조 기준)
+    fc_it    = [p.get("predicted_it_load_kw")      or 0.0 for p in preds]
+    fc_cool  = [p.get("predicted_cooling_load_kw") or 0.0 for p in preds]
+
+    # Forecast Service는 5분 step 단위로 응답 → 시간 환산용 상수
+    _STEPS_PER_HOUR = 12
+
+    def _step_at_h(hour: int) -> int:
+        """T+{hour}h 시점의 step 인덱스. 응답 길이 초과 시 마지막 step으로 클램프."""
+        return min(hour * _STEPS_PER_HOUR - 1, len(fc_it) - 1) if fc_it else 0
+
+    idx_1h    = _step_at_h(1) if fc_it else 0
+    next_it   = float(fc_it[idx_1h])   if fc_it   else 0.0
+    next_cool = float(fc_cool[idx_1h]) if fc_cool else 0.0
+
+    peak_step = int(max(range(len(fc_it)), key=lambda i: fc_it[i])) if fc_it else 0
+    peak_it_v = float(fc_it[peak_step]) if fc_it else 0.0
+    peak_it_h = peak_step / _STEPS_PER_HOUR   # step → 시간 환산 (소수 가능)
+    it_delta_pct = ((next_it / cur_it) - 1.0) * 100.0 if cur_it > 0 else 0.0
+
+    # 권장 액션 룰: 6h 내 피크가 현재 +20% 초과면 칠러 대비 권장
+    if cur_it > 0 and peak_it_v / cur_it >= 1.20:
+        action = f"T+{peak_it_h:.1f}h 부하 +{(peak_it_v / cur_it - 1) * 100:.0f}% 예상 — 칠러 모드 사전 전환 권장"
+        action_color = CLR_DANGER
+    elif cur_it > 0 and peak_it_v / cur_it <= 0.85:
+        action = f"T+{peak_it_h:.1f}h 부하 {(peak_it_v / cur_it - 1) * 100:.0f}% 예상 — Free Cooling 비중 확대 가능"
+        action_color = CLR_GOOD
+    else:
+        action = "예측 범위 내 안정 — 현재 제어 유지"
+        action_color = "#64748b"
+
+    f1, f2, f3 = st.columns(3)
+    f1.metric("T+1h IT 부하",  f"{next_it:.0f} kW",  f"{it_delta_pct:+.1f}% vs 현재")
+    f2.metric("T+1h 냉각 수요", f"{next_cool:.0f} kW")
+    f3.metric(f"6h 피크 (T+{peak_it_h:.1f}h)", f"{peak_it_v:.0f} kW")
+
+    st.markdown(
+        f'<div style="background:{action_color}1a;border-left:3px solid {action_color};'
+        f'border-radius:0 6px 6px 0;padding:10px 14px;margin:8px 0 4px;">'
+        f'<span style="font-size:0.78rem;font-weight:700;color:{action_color};'
+        f'text-transform:uppercase;letter-spacing:0.05em;margin-right:10px;">권장 액션</span>'
+        f'<span style="font-size:0.9rem;">{action}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # 6시간 예측 미니 라인 — 5분 step 인덱스를 시간으로 환산해서 x축에 깔기
+    hours_fc = [(i + 1) / _STEPS_PER_HOUR for i in range(len(fc_it))]
+    fig_fc = go.Figure()
+    fig_fc.add_trace(go.Scatter(
+        x=hours_fc, y=fc_it, name="IT 부하 (kW)",
+        line=dict(color=CLR_IT, width=2),
+        hovertemplate="T+%{x:.2f}h<br>%{y:.0f} kW<extra></extra>",
+    ))
+    fig_fc.add_trace(go.Scatter(
+        x=hours_fc, y=fc_cool, name="냉각 수요 (kW)",
+        line=dict(color=CLR_CHILLER, width=2),
+        hovertemplate="T+%{x:.2f}h<br>%{y:.0f} kW<extra></extra>",
+    ))
+    fig_fc.update_layout(
+        height=160,
+        margin=dict(t=10, b=30, l=10, r=10),
+        xaxis=dict(title="T+h", dtick=1),
+        yaxis=dict(title="kW"),
+        legend=dict(orientation="h", y=-0.4),
+        showlegend=True,
+    )
+    st.plotly_chart(fig_fc, width="stretch")
+
+st.divider()
+
 # ── Section 1: 냉각 제어 ─────────────────────────────────────────────────
 
 mode_label   = COOLING_MODE_LABELS.get(d["current_mode"], d["current_mode"])
 # 습구 온도 기반 자유공조 가용 판정 (환경 칠러 모델과 동일 기준)
-# 대시보드 시뮬은 습도 미추적 → 한국 평균 60% 가정
-_humidity_assumption = 60.0
-_wet_bulb = calculate_wet_bulb_c(d["current_outdoor"], _humidity_assumption)
+# parquet 실측 습도(peak 시점) 사용 — sin 폴백 시 DEFAULT_HUMIDITY_PCT
+_df_peak = d["df"]
+_humidity = float(_df_peak.loc[d["peak_idx"], "외기 습도 (%)"]) if "외기 습도 (%)" in _df_peak.columns else DEFAULT_HUMIDITY_PCT
+_wet_bulb = calculate_wet_bulb_c(d["current_outdoor"], _humidity)
 free_cool_ok = _wet_bulb < WET_BULB_FREE_THRESHOLD_C
 
 # Free Cooling 상태 배지
@@ -74,12 +175,36 @@ with col_kpi:
 
 with col_ctrl:
     with st.container(border=True):
+        # 외기 기준 공통 메타데이터 — control_service가 wet-bulb로 결정 (모델 추천과 무관)
+        # Rule/RL 응답에 동일하게 들어오므로 둘 중 아무거나 사용. 둘 다 오프라인이면 fallback "-"
+        _meta_src = d["ctrl_rule"] if "error" not in d["ctrl_rule"] else d["ctrl_rl"]
+        if "error" not in _meta_src:
+            _meta_mode  = COOLING_MODE_LABELS.get(_meta_src.get("cooling_mode", ""), "-")
+            _meta_ratio = f'{_meta_src.get("free_cooling_ratio", 0.0):.0%}'
+        else:
+            _meta_mode  = "-"
+            _meta_ratio = "-"
+
         st.markdown(
             f'<p style="font-size:0.85rem;font-weight:700;opacity:0.7;'
             f'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">'
             f'제어 서비스 추천</p>'
-            f'<p style="font-size:0.82rem;opacity:0.55;margin-bottom:14px;">'
-            f'피크 기준 — 외기 {d["current_outdoor"]}°C / IT {d["peak_it_power"]:.0f} kW</p>',
+            f'<p style="font-size:0.82rem;opacity:0.55;margin-bottom:10px;">'
+            f'피크 기준 — 외기 {d["current_outdoor"]}°C / IT {d["peak_it_power"]:.0f} kW</p>'
+            # 외기 기준 메타데이터 띠 — 두 모델 공통값임을 시각적으로 분리
+            f'<div style="background:rgba(128,128,128,0.06);border-radius:8px;'
+            f'padding:8px 12px;margin-bottom:12px;display:flex;gap:18px;align-items:center;">'
+            f'<div style="font-size:0.62rem;opacity:0.55;text-transform:uppercase;'
+            f'letter-spacing:0.05em;font-weight:700;">외기 기준</div>'
+            f'<div style="display:flex;gap:14px;font-size:0.82rem;">'
+            f'<span><span style="opacity:0.55;">냉각모드</span> '
+            f'<b>{_meta_mode}</b></span>'
+            f'<span><span style="opacity:0.55;">Free Cooling</span> '
+            f'<b>{_meta_ratio}</b></span>'
+            f'</div>'
+            f'<div style="margin-left:auto;font-size:0.65rem;opacity:0.45;font-style:italic;">'
+            f'* wet-bulb 기준 라벨</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
@@ -106,30 +231,21 @@ with col_ctrl:
                     f'<div style="font-size:0.8rem;opacity:0.45;">서비스 연결 불가</div>'
                     f'</div>'
                 )
-            mode_ko = COOLING_MODE_LABELS.get(result.get("cooling_mode", ""), result.get("cooling_mode", "-"))
             temp_raw = result.get("supply_air_temp_setpoint_c")
             temp_str = f"{temp_raw:.2f}°C" if isinstance(temp_raw, (int, float)) else "-"
-            ratio    = f'{result.get("free_cooling_ratio", 0.0):.0%}'
-            metrics  = [("냉각 모드", mode_ko), ("설정 온도", temp_str), ("Free Cooling", ratio)]
-            cells = "".join(
-                f'<div>'
-                f'<div style="font-size:0.62rem;opacity:0.45;text-transform:uppercase;'
-                f'letter-spacing:0.04em;margin-bottom:4px;">{k}</div>'
-                f'<div style="font-size:0.95rem;font-weight:700;">{v}</div>'
-                f'</div>'
-                for k, v in metrics
-            )
+            # 모델이 실제로 결정하는 값은 supply setpoint — 크게 강조.
             return (
                 f'<div style="background:{accent}0d;border:1px solid {accent}33;'
                 f'border-radius:10px;padding:12px 14px;margin-bottom:10px;">'
-                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
                 f'<span style="font-size:0.78rem;font-weight:700;color:{accent};'
                 f'text-transform:uppercase;letter-spacing:0.05em;">{label}</span>'
                 f'<span style="margin-left:auto;">{online_dot}</span>'
                 f'</div>'
-                f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
-                f'{cells}'
-                f'</div>'
+                f'<div style="font-size:0.62rem;opacity:0.45;text-transform:uppercase;'
+                f'letter-spacing:0.04em;margin-bottom:2px;">추천 공급 온도</div>'
+                f'<div style="font-size:1.5rem;font-weight:800;color:{accent};line-height:1.1;">'
+                f'{temp_str}</div>'
                 f'</div>'
             )
 
@@ -232,6 +348,11 @@ else:
     s3.metric("탄소 배출 증가",  f"{esg['carbon_tco2_day']:.3f} tCO₂", f"{carbon_delta:+.3f} tCO₂", delta_color="inverse")
     s4.metric("IT 부하 변화",    f"{df['IT 전력 (kW)'].mean():.0f} kW", f"{it_delta_pct:+.1f}%",      delta_color="inverse")
 
+    st.info(
+        f"**권장 대응 전략** — {CRISIS_STRATEGIES.get(d['crisis_mode'], '-')}",
+        icon=":material/lightbulb:",
+    )
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     hours = list(range(24))
@@ -306,8 +427,8 @@ else:
                 x=hours, y=df["환기 온도 (°C)"],
                 name="위기", line=dict(color=CLR_DANGER, width=2),
             ))
-            fig4.add_hline(y=27.0, line_dash="dash", line_color="red",
-                           annotation_text="경고 27°C")
+            fig4.add_hline(y=TEMP_WARNING_THRESHOLD_C, line_dash="dash", line_color="red",
+                           annotation_text=f"경고 {TEMP_WARNING_THRESHOLD_C:.0f}°C")
             fig4.update_layout(
                 title="환기 온도 (°C)", height=280,
                 margin=dict(t=40, b=50, l=10, r=10),

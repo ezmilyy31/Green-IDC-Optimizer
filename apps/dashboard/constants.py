@@ -1,6 +1,7 @@
 """대시보드 공통 상수 정의 대부분이 디자인적인것들."""
 
 from core.config.constants import (
+    CARBON_FACTOR_KG_PER_KWH as CARBON_FACTOR_KG_PER_KWH,
     CARBON_FACTOR_TCO2_PER_MWH as CARBON_FACTOR_TCO2_PER_MWH,
     CRISIS_CONFIGS as CRISIS_CONFIGS,
     CRISIS_STRATEGIES as CRISIS_STRATEGIES,
@@ -12,6 +13,10 @@ from core.config.constants import (
 )
 
 TEMP_WARNING_THRESHOLD_C = T_RETURN_DESIGN_C  # 경고 임계값 = 설계 환기 온도 (27°C)
+
+# 실측 습도가 없을 때 사용하는 기본값 (sin 폴백/제어 추천 호출용).
+# 한국 IDC 평균 60% RH 가정 — parquet 실측값이 있으면 그쪽이 우선.
+DEFAULT_HUMIDITY_PCT = 60.0
 
 # ── 통합 색상 팔레트 ──────────────────────────────────────────────────────────
 # 메인 블루 팔레트: #5D90FF (강조 블루) · #7BD2F7 (스카이) · #A3ABFB (인디고)
@@ -55,6 +60,7 @@ PUE_BENCHMARKS = [
     if k in _PUE_LABEL_MAP
 ]
 
+# RL vs Rule-based A/B 페이지의 재생 속도 슬라이더 옵션
 ANIM_SPEED_OPTIONS = {
     "매우 빠르게 (0.1초)": 0.1,
     "빠르게 (0.2초)":      0.2,

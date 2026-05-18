@@ -177,7 +177,7 @@ def _build_pue_chart(sub_rule: pd.DataFrame, sub_best: pd.DataFrame, sub_hybrid:
         name="RL Hybrid (안전)", line=dict(color=CLR_HYBRID, width=2.5),
     ))
     fig.update_layout(
-        title="PUE 비교 (낮을수록 좋음)",
+        title="PUE 비교 — RL vs Rule-based (낮을수록 best)",
         height=280, margin=dict(l=10, r=10, t=40, b=10),
         xaxis_title="경과 시간 (분)", yaxis_title="PUE",
         xaxis=dict(range=[0, X_MAX], fixedrange=True),
