@@ -55,7 +55,7 @@ st.divider()
 
 # ── KPI 카드 ──────────────────────────────────────────────────────────────
 
-pue_delta = f"{((d['avg_pue'] - NAVER_PUE_BENCHMARK) / NAVER_PUE_BENCHMARK * 100):+.1f}% vs NAVER"
+pue_delta = f"{((pue_rule - NAVER_PUE_BENCHMARK) / NAVER_PUE_BENCHMARK * 100):+.1f}% vs NAVER"
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("PUE (Rule)", f"{pue_rule:.3f}", pue_delta, delta_color="inverse",
           help="규칙기반 컨트롤러 24h 평균. NAVER 각 춘천(1.09) 대비 비교")
@@ -75,7 +75,10 @@ col_gauge, col_power, col_pue = st.columns(3)
 
 with col_gauge:
     with st.container(border=True):
-        st.plotly_chart(build_pue_gauge(d["avg_pue"]), width="stretch")
+        st.plotly_chart(
+            build_pue_gauge(pue_rl, title="PUE — RL (24h 평균)"),
+            width="stretch",
+        )
 
 with col_power:
     with st.container(border=True):

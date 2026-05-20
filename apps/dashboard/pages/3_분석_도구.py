@@ -16,16 +16,18 @@ import streamlit as st
 from apps.dashboard.api_client import call_forecast
 from apps.dashboard.constants import CLR_CHILLER, CLR_IT, TEMP_WARNING_THRESHOLD_C
 from apps.dashboard.sidebar import render_sidebar
+from apps.dashboard.simulation import get_scenario_timestamp
 
 d = render_sidebar()
 
 
 @st.cache_data(ttl=300)
-def _fetch_forecast(horizon_hours: int = 24, model_type: str = "lgbm") -> dict:
+def _fetch_forecast(horizon_hours: int, current_timestamp: str, model_type: str = "lgbm") -> dict:
     return call_forecast(
         horizon_hours=horizon_hours,
         include_prediction_interval=True,
         model_type=model_type,
+        current_timestamp=current_timestamp,
     )
 
 
@@ -110,7 +112,7 @@ with tab_anim:
     st.divider()
 
     fc_model_label = "LGBM"
-    _fc    = _fetch_forecast(horizon_hours=24, model_type="lgbm")
+    _fc    = _fetch_forecast(horizon_hours=24, current_timestamp=get_scenario_timestamp(d["scenario"]), model_type="lgbm")
     _fc_ok = "error" not in _fc
 
     if not _fc_ok:

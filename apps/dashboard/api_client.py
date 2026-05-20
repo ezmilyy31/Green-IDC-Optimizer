@@ -165,22 +165,28 @@ def call_forecast(
     horizon_hours: int = 24,
     include_prediction_interval: bool = True,
     model_type: str = "lgbm",
+    current_timestamp: str | None = None,
 ) -> dict:
     """POST /api/v1/forecast — API Gateway 경유 IT 부하/냉각 수요 예측.
 
     model_type: "lgbm" | "moving_avg" | "lstm" (ModelType enum과 정합).
+    current_timestamp: ISO 8601 문자열. 미지정 시 서버 UTC 현재 시각 사용.
+    시즌별 시뮬레이션과 동기화하려면 시즌 시작 timestamp를 전달한다.
 
     응답 predictions 리스트의 각 항목:
         timestamp, predicted_it_load_kw, predicted_cooling_load_kw,
         cooling_mode, lower/upper_bound_it_load_kw, lower/upper_bound_cooling_load_kw
     """
+    payload: dict = {
+        "forecast_horizon_hours": horizon_hours,
+        "include_prediction_interval": include_prediction_interval,
+        "model_type": model_type,
+    }
+    if current_timestamp is not None:
+        payload["current_timestamp"] = current_timestamp
     return _post(
         f"{API_URL}/api/v1/forecast",
-        {
-            "forecast_horizon_hours": horizon_hours,
-            "include_prediction_interval": include_prediction_interval,
-            "model_type": model_type,
-        },
+        payload,
         timeout=_TIMEOUT_SLOW,
     )
 

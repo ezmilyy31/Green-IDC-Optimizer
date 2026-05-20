@@ -12,10 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import plotly.graph_objects as go
 import streamlit as st
 
-from apps.dashboard.api_client import call_forecast
 from apps.dashboard.charts import build_cooling_donut
 from apps.dashboard.constants import (
-    CLR_CHILLER,
     CLR_DANGER,
     CLR_GOOD,
     CLR_IT,
@@ -34,102 +32,6 @@ d = render_sidebar()
 
 st.title(":material/tune: 운영 관리")
 st.caption("냉각 제어 현황 · 위기 시나리오 분석")
-st.divider()
-
-# ── Section 0: 사전알림 (Forecast 기반) ───────────────────────────────────
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def _forecast_preview(horizon_hours: int = 6) -> dict:
-    """다음 N시간 IT 부하/냉각 수요 예측 — 운영 의사결정용 짧은 호라이즌."""
-    return call_forecast(horizon_hours=horizon_hours, include_prediction_interval=True, model_type="lgbm")
-
-
-fc = _forecast_preview(horizon_hours=6)
-fc_ok = "error" not in fc and fc.get("predictions")
-
-st.markdown(
-    '<span style="font-size:1.1rem;font-weight:700;">사전알림 — 다음 6시간 예측</span>',
-    unsafe_allow_html=True,
-)
-
-if not fc_ok:
-    st.info(
-        "Forecast Service 오프라인 — 사전알림을 표시할 수 없습니다. "
-        "서비스 연결 후 자동으로 다음 6시간 IT 부하 / 냉각 수요 예측이 표시됩니다.",
-        icon=":material/info:",
-    )
-else:
-    preds = fc["predictions"]
-    cur_it   = d["peak_it_power"]  # 현재 피크 IT 부하 (참조 기준)
-    fc_it    = [p.get("predicted_it_load_kw")      or 0.0 for p in preds]
-    fc_cool  = [p.get("predicted_cooling_load_kw") or 0.0 for p in preds]
-
-    # Forecast Service는 5분 step 단위로 응답 → 시간 환산용 상수
-    _STEPS_PER_HOUR = 12
-
-    def _step_at_h(hour: int) -> int:
-        """T+{hour}h 시점의 step 인덱스. 응답 길이 초과 시 마지막 step으로 클램프."""
-        return min(hour * _STEPS_PER_HOUR - 1, len(fc_it) - 1) if fc_it else 0
-
-    idx_1h    = _step_at_h(1) if fc_it else 0
-    next_it   = float(fc_it[idx_1h])   if fc_it   else 0.0
-    next_cool = float(fc_cool[idx_1h]) if fc_cool else 0.0
-
-    peak_step = int(max(range(len(fc_it)), key=lambda i: fc_it[i])) if fc_it else 0
-    peak_it_v = float(fc_it[peak_step]) if fc_it else 0.0
-    peak_it_h = peak_step / _STEPS_PER_HOUR   # step → 시간 환산 (소수 가능)
-    it_delta_pct = ((next_it / cur_it) - 1.0) * 100.0 if cur_it > 0 else 0.0
-
-    # 권장 액션 룰: 6h 내 피크가 현재 +20% 초과면 칠러 대비 권장
-    if cur_it > 0 and peak_it_v / cur_it >= 1.20:
-        action = f"T+{peak_it_h:.1f}h 부하 +{(peak_it_v / cur_it - 1) * 100:.0f}% 예상 — 칠러 모드 사전 전환 권장"
-        action_color = CLR_DANGER
-    elif cur_it > 0 and peak_it_v / cur_it <= 0.85:
-        action = f"T+{peak_it_h:.1f}h 부하 {(peak_it_v / cur_it - 1) * 100:.0f}% 예상 — Free Cooling 비중 확대 가능"
-        action_color = CLR_GOOD
-    else:
-        action = "예측 범위 내 안정 — 현재 제어 유지"
-        action_color = "#64748b"
-
-    f1, f2, f3 = st.columns(3)
-    f1.metric("T+1h IT 부하",  f"{next_it:.0f} kW",  f"{it_delta_pct:+.1f}% vs 현재")
-    f2.metric("T+1h 냉각 수요", f"{next_cool:.0f} kW")
-    f3.metric(f"6h 피크 (T+{peak_it_h:.1f}h)", f"{peak_it_v:.0f} kW")
-
-    st.markdown(
-        f'<div style="background:{action_color}1a;border-left:3px solid {action_color};'
-        f'border-radius:0 6px 6px 0;padding:10px 14px;margin:8px 0 4px;">'
-        f'<span style="font-size:0.78rem;font-weight:700;color:{action_color};'
-        f'text-transform:uppercase;letter-spacing:0.05em;margin-right:10px;">권장 액션</span>'
-        f'<span style="font-size:0.9rem;">{action}</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # 6시간 예측 미니 라인 — 5분 step 인덱스를 시간으로 환산해서 x축에 깔기
-    hours_fc = [(i + 1) / _STEPS_PER_HOUR for i in range(len(fc_it))]
-    fig_fc = go.Figure()
-    fig_fc.add_trace(go.Scatter(
-        x=hours_fc, y=fc_it, name="IT 부하 (kW)",
-        line=dict(color=CLR_IT, width=2),
-        hovertemplate="T+%{x:.2f}h<br>%{y:.0f} kW<extra></extra>",
-    ))
-    fig_fc.add_trace(go.Scatter(
-        x=hours_fc, y=fc_cool, name="냉각 수요 (kW)",
-        line=dict(color=CLR_CHILLER, width=2),
-        hovertemplate="T+%{x:.2f}h<br>%{y:.0f} kW<extra></extra>",
-    ))
-    fig_fc.update_layout(
-        height=160,
-        margin=dict(t=10, b=30, l=10, r=10),
-        xaxis=dict(title="T+h", dtick=1),
-        yaxis=dict(title="kW"),
-        legend=dict(orientation="h", y=-0.4),
-        showlegend=True,
-    )
-    st.plotly_chart(fig_fc, width="stretch")
-
 st.divider()
 
 # ── Section 1: 냉각 제어 ─────────────────────────────────────────────────
@@ -341,12 +243,15 @@ else:
         unsafe_allow_html=True,
     )
 
-    # KPI 델타 카드
+    # KPI 델타 카드 — 변화량이 실질적으로 0이면 뱃지 숨김
+    def _delta(value: float, fmt: str, threshold: float, suffix: str = "") -> str | None:
+        return f"{format(value, fmt)}{suffix}" if abs(value) >= threshold else None
+
     s1, s2, s3, s4 = st.columns(4)
-    s1.metric("PUE 변화",       f"{avg_pue:.3f}",                      f"{pue_delta:+.3f} vs 정상",  delta_color="inverse")
-    s2.metric("전력 비용 증가",  f"{esg['cost_krw_day']:.1f} 만원",     f"{cost_delta:+.2f} 만원",    delta_color="inverse")
-    s3.metric("탄소 배출 증가",  f"{esg['carbon_tco2_day']:.3f} tCO₂", f"{carbon_delta:+.3f} tCO₂", delta_color="inverse")
-    s4.metric("IT 부하 변화",    f"{df['IT 전력 (kW)'].mean():.0f} kW", f"{it_delta_pct:+.1f}%",      delta_color="inverse")
+    s1.metric("PUE 변화",       f"{avg_pue:.3f}",                      _delta(pue_delta,    "+.3f", 0.0005, " vs 정상"), delta_color="inverse")
+    s2.metric("전력 비용 증가",  f"{esg['cost_krw_day']:.1f} 만원",     _delta(cost_delta,   "+.2f", 0.005,  " 만원"),     delta_color="inverse")
+    s3.metric("탄소 배출 증가",  f"{esg['carbon_tco2_day']:.3f} tCO₂", _delta(carbon_delta, "+.3f", 0.0005, " tCO₂"),    delta_color="inverse")
+    s4.metric("IT 부하 변화",    f"{df['IT 전력 (kW)'].mean():.0f} kW", _delta(it_delta_pct, "+.1f", 0.05,   "%"),         delta_color="inverse")
 
     st.info(
         f"**권장 대응 전략** — {CRISIS_STRATEGIES.get(d['crisis_mode'], '-')}",

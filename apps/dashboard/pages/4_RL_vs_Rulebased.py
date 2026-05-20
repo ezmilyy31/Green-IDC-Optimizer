@@ -103,25 +103,13 @@ if not summary["rl_loaded"]:
 # ── 시나리오 전체 결과: RL Best 카드 ─────────────────────────────────────
 st.markdown("##### 시나리오 전체 결과")
 
-def _safety_delta(violations: int) -> tuple[str, str]:
-    return ("안전", "normal") if violations == 0 else ("주의", "inverse")
-
 with st.container(border=True):
     st.markdown(":blue[**RL Best**]  ·  효율 우선 + safe fallback")
-    sb1, sb2 = st.columns(2)
-    sb1.metric(
-        "Rule 대비 절감",
-        f"{summary['best_savings_pct']:+.2f}%",
-        f"{summary['best_savings_kwh']:+,.1f} kWh",
-        delta_color="off",
-    )
-    delta_text, delta_color = _safety_delta(summary['best_violations'])
-    sb2.metric(
-        "온도 위반",
-        f"{summary['best_violations']} 회",
-        delta_text,
-        delta_color=delta_color,
-    )
+    sb1, sb2, sb3, sb4 = st.columns(4)
+    sb1.metric("절감률",     f"{summary['best_savings_pct']:+.1f} %")
+    sb2.metric("절감 전력",  f"{summary['best_savings_kwh']:+,.1f} kWh")
+    sb3.metric("절감액",     f"{summary['best_savings_krw']:+,.0f} 원")
+    sb4.metric("온도 위반",  f"{summary['best_violations']:,d} 회")
 
 st.divider()
 
@@ -240,15 +228,15 @@ def playback_fragment():
         text=f"{idx + 1}/{n_steps} step  ·  경과 {elapsed_min // 60:02d}:{elapsed_min % 60:02d} (5분 간격)",
     )
 
-    # 라이브 카운터: Rule/Best 누적 kWh + Best 기준 절감액
+    # 라이브 카운터: Rule/Best 누적 전력 + Best 기준 절감액
     st.markdown("##### :material/speed: 누적 카운터")
     save_best_kwh = float(cur_rule["누적 kWh"] - cur_best["누적 kWh"])
     save_best_krw = float(cur_rule["누적 원"] - cur_best["누적 원"])
 
     lc1, lc2, lc3 = st.columns(3)
-    lc1.metric("Rule 누적 kWh", f"{cur_rule['누적 kWh']:,.1f}")
-    lc2.metric("Best 누적 kWh", f"{cur_best['누적 kWh']:,.1f}", f"{-save_best_kwh:+,.1f}")
-    lc3.metric("Best 누적 절감액", f"₩ {save_best_krw:,.0f}")
+    lc1.metric("Rule 누적 전력", f"{cur_rule['누적 kWh']:,.1f} kWh")
+    lc2.metric("Best 누적 전력", f"{cur_best['누적 kWh']:,.1f} kWh", f"{-save_best_kwh:+,.1f} kWh")
+    lc3.metric("Best 절감액",    f"{save_best_krw:+,.0f} 원")
 
     # 시간축 비교 (현재 step까지만 슬라이스)
     sub_rule = df_rule.iloc[: idx + 1]
@@ -265,9 +253,9 @@ def playback_fragment():
         best_viol = summary["best_violations"]
         st.success(
             f"**시뮬레이션 종료** — "
-            f"RL Best **{best_pct:+.2f}%** 절감 (위반 {best_viol}회). "
-            f"연 환산 절감액 추정 ₩{summary['best_savings_krw']:,.0f} · "
-            f"CO₂ {summary['best_savings_co2']:.1f}kg",
+            f"RL Best **{best_pct:+.1f} %** 절감 (위반 {best_viol} 회). "
+            f"누적 절감액 {summary['best_savings_krw']:+,.0f} 원 · "
+            f"CO₂ {summary['best_savings_co2']:+,.1f} kg",
             icon=":material/celebration:",
         )
 
