@@ -135,6 +135,7 @@ def train(
     reward_type: str = "weighted",
     domain_randomize: bool = False,
     freeze_vecnorm: bool = False,
+    seed: int = 0,
 ) -> Path:
     """PPO 학습 실행.
 
@@ -191,6 +192,7 @@ def train(
                 verbose=1,
                 tensorboard_log=None,
                 device=device,
+                seed=seed,
             )
         print(f"[rl_agent] SAC 학습 시작: {run_name}")
         print(f"  lr={lr}, batch_size={batch_size}, gamma={gamma}")
@@ -301,6 +303,7 @@ def parse_args():
                         help="IDCEnv 도메인 랜덤화 (위기 시나리오 fine-tune용, custom-env 전용)")
     parser.add_argument("--freeze-vecnorm", action="store_true",
                         help="resume 시 VecNormalize 통계 동결 (fine-tune 모드, normalizer 안정화)")
+    parser.add_argument("--seed", type=int, default=0, help="랜덤 시드 (재현성 보장)")
     return parser.parse_args()
 
 
@@ -325,4 +328,5 @@ if __name__ == "__main__":
         reward_type=args.reward_type,
         domain_randomize=args.domain_randomize,
         freeze_vecnorm=args.freeze_vecnorm,
+        seed=args.seed,
     )
