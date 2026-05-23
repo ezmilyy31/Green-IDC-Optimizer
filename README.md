@@ -74,7 +74,7 @@ Green-IDC-Optimizer$ docker compose down
 - **SPECpower_ssj2008 기반 서버 전력 모델**: `P = P_idle + (P_max - P_idle) × cpu_util` (CPU서버: idle 200W / max 500W, GPU서버: idle 300W / max 1500W)
 - **냉각 부하 계산**: `Q = ṁ × cp × ΔT` 직접 구현
 - **칠러 COP 모델**: 외기온도 + 공급온도 + 부분부하율(PLR) 기반 비선형 효율 모델
-- **습구온도 기반 냉각 모드 자동 전환**: Free Cooling(습구 <10°C) / Hybrid(<18°C)??? / Chiller(≥18°C)
+- **습구온도 기반 냉각 모드 자동 전환**: Free Cooling(습구 <10°C) / Hybrid(10~18°C) / Chiller(>18°C)
 - **PUE 계산**: 구글 데이터센터 PUE 1.10 벤치마크 기준
 
 #### 4-2-2. IT 부하 / 냉각 수요 예측
@@ -91,7 +91,7 @@ Green-IDC-Optimizer$ docker compose down
 - **커스텀 IDC Gym 환경** (`idc_env.py`): 실측 Google Cluster Trace 2019 + 기상청 ASOS 데이터 기반 (365일 × 288스텝)
 - **관측 공간**: 9차원 (시간, 외기온도, 습도, CPU 사용률, 존 온도, 공급온도, IT전력, 습구온도 등)
 - **행동 공간**: 공급온도 설정값 [18, 25]°C
-- **알고리즘**: SAC (Soft Actor-Critic) + PPO (Proximal Policy Optimization)???? (Stable-Baselines3)
+- **알고리즘**: SAC (Soft Actor-Critic), PPO 비교 실험 후 채택 (Stable-Baselines3)
 - **도메인 랜덤화**: 학습 중 위기 시나리오 자동 주입 — 서버급증(CPU ×1.3) / 폭염(외기 +5~10°C) / 칠러 효율 저하
 - **2-tier 안전 시스템**: RL 추론 + 존 온도 26.5°C 초과 시 강제 냉각 fallback
 - **Rule-based 컨트롤러** + **PID 제어기** (Anti-windup, Incremental PID) 구현
