@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pickle
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -27,75 +28,78 @@ PARQUET_PATH = Path(__file__).resolve().parents[2] / "data" / "weather" / "synth
 # 디스크 캐시: 시나리오별 시뮬레이션 결과를 pickle로 보관 → 컨테이너 재시작에도 유지
 # 시나리오 fingerprint(start_idx, n_steps, cpu_boost, outdoor_offset_c)가 바뀌면 자동 재계산
 # 코드/모델 변경 시 강제 무효화하려면 CACHE_VERSION 숫자만 올리면 됨
-CACHE_VERSION = "v2"
+CACHE_VERSION = "v5"
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "playback"
-
 
 @dataclass(frozen=True)
 class ScenarioPreset:
     key: str
     label: str
     description: str
+    season: str
     start_idx: int
     n_steps: int
-    cpu_boost: float = 1.0       # IT부하 배율 (스파이크 시나리오용)
-    outdoor_offset_c: float = 0.0  # 외기 온도 오프셋
+    cpu_boost: float = 1.0
+    outdoor_offset_c: float = 0.0
 
 
-def _find_extreme_window(df: pd.DataFrame, col: str, mode: str, window_days: int) -> int:
-    """col 컬럼이 window_days 기간에서 가장 hot/cold인 시작 idx를 반환."""
+def _season_mask(ts: pd.Series, months: list[int]) -> pd.Series:
+    return ts.dt.month.isin(months)
+
+
+def _find_extreme_in_season(
+    df: pd.DataFrame, col: str, mode: str, window_days: int, months: list[int],
+) -> int:
     win = window_days * STEPS_PER_DAY
     rolling = df[col].rolling(win).mean()
-    if mode == "max":
-        end_idx = int(rolling.idxmax())
-    else:
-        end_idx = int(rolling.idxmin())
+    mask = _season_mask(df["timestamp"], months)
+    candidates = rolling.where(mask)
+    end_idx = int(candidates.idxmax() if mode == "max" else candidates.idxmin())
     return max(0, end_idx - win + 1)
 
 
+@lru_cache(maxsize=1)
 def list_scenarios() -> list[ScenarioPreset]:
-    """1년치 데이터를 스캔해 시나리오 프리셋을 동적으로 생성."""
-    df = pd.read_parquet(PARQUET_PATH, columns=["outside_temp_c", "cpu_utilization"])
+    """대표 구간(2일/1일) 시뮬 프리셋 생성. 프로세스 내 최초 1회만 parquet 탐색."""
+    df = pd.read_parquet(PARQUET_PATH, columns=["timestamp", "outside_temp_c", "cpu_utilization"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-    heatwave_start = _find_extreme_window(df, "outside_temp_c", "max", 2)
-    coldsnap_start = _find_extreme_window(df, "outside_temp_c", "min", 2)
-    shoulder_start = _find_extreme_window(df, "outside_temp_c", "max", 2)
-    # 환절기: 외기 평균이 15°C 근처인 첫 구간
-    shoulder_target = (df["outside_temp_c"].rolling(STEPS_PER_DAY).mean() - 15.0).abs()
-    shoulder_start = int(shoulder_target.idxmin()) - STEPS_PER_DAY + 1
-    shoulder_start = max(0, shoulder_start)
+    # ── 여름: 가장 더운 2일 (폭염)
+    summer_start = _find_extreme_in_season(df, "outside_temp_c", "max", 2, [6, 7, 8])
 
-    # IT 부하 스파이크: cpu가 가장 높은 1일
-    spike_start = _find_extreme_window(df, "cpu_utilization", "max", 1)
+    # ── 가을: 외기 15°C 근처 1일 (환절기)
+    autumn_mask = _season_mask(df["timestamp"], [9, 10, 11])
+    autumn_roll = (df["outside_temp_c"].rolling(STEPS_PER_DAY).mean() - 15.0).abs()
+    autumn_end  = int(autumn_roll.where(autumn_mask).idxmin())
+    autumn_start = max(0, autumn_end - STEPS_PER_DAY + 1)
+
+    # ── 겨울: 가장 추운 2일 (혹한기)
+    winter_start = _find_extreme_in_season(df, "outside_temp_c", "min", 2, [12, 1, 2])
+
+    # ── IT 스파이크: cpu 가장 높은 1일
+    spike_end   = int(df["cpu_utilization"].rolling(STEPS_PER_DAY).mean().idxmax())
+    spike_start = max(0, spike_end - STEPS_PER_DAY + 1)
 
     return [
         ScenarioPreset(
-            key="heatwave",
-            label="혹서기 폭염 (2일)",
-            description="1년 중 외기 가장 더운 48시간 — 칠러 풀가동 구간에서 RL의 절감 여력 확인",
-            start_idx=heatwave_start,
-            n_steps=2 * STEPS_PER_DAY,
+            key="summer", label="폭염",
+            description="6–8월 중 가장 더운 2일 대표 구간",
+            season="summer", start_idx=summer_start, n_steps=2 * STEPS_PER_DAY,
         ),
         ScenarioPreset(
-            key="coldsnap",
-            label="한파 (2일)",
-            description="1년 중 외기 가장 추운 48시간 — 자연공조 100% 활용 가능 구간",
-            start_idx=coldsnap_start,
-            n_steps=2 * STEPS_PER_DAY,
+            key="autumn", label="환절기",
+            description="9–11월 외기 15°C 근처 1일 대표 구간",
+            season="autumn", start_idx=autumn_start, n_steps=STEPS_PER_DAY,
         ),
         ScenarioPreset(
-            key="shoulder",
-            label="환절기 (1일)",
-            description="외기 15°C 근처 — Free/Hybrid/Chiller 모드가 모두 등장하는 가장 까다로운 구간",
-            start_idx=shoulder_start,
-            n_steps=STEPS_PER_DAY,
+            key="winter", label="혹한기",
+            description="12–2월 중 가장 추운 2일 대표 구간",
+            season="winter", start_idx=winter_start, n_steps=2 * STEPS_PER_DAY,
         ),
         ScenarioPreset(
-            key="it_spike",
-            label="IT 부하 스파이크 (1일)",
-            description="가장 바쁜 24시간 + 추가 부하 부스트(×1.2) — 과부하 시 안전 제어 확인",
-            start_idx=spike_start,
-            n_steps=STEPS_PER_DAY,
+            key="it_spike", label="IT 스파이크",
+            description="연중 CPU 부하가 가장 높은 1일 · 부하 부스트 ×1.2",
+            season="other", start_idx=spike_start, n_steps=STEPS_PER_DAY,
             cpu_boost=1.2,
         ),
     ]
@@ -320,3 +324,43 @@ def simulate_compare_cached(scenario: ScenarioPreset) -> dict:
     except Exception as exc:
         print(f"[playback] 캐시 저장 실패 (계속 진행): {exc}")
     return result
+
+
+# ── 규모별 도입 효과 환산 ──────────────────────────────────────────────────
+# 시뮬레이션은 서버 500대(SyntheticIDCBuilder 구성, data_pipeline.py:445)를
+# 기준으로 돌아간다. 의사결정자에게 "우리 규모면 연 얼마"를 보여주기 위해
+# 전 시나리오(폭염/한파/스파이크/환절기)의 RL Best 절감을 연환산·평균내
+# "서버 1대당 연간 절감 전력(kWh)" 계수를 만든다. 이 계수를 서버 대수에
+# 선형 곱하면 임의 규모의 연간 절감액/탄소를 추정할 수 있다.
+
+SIM_BASE_SERVERS = 500  # 시뮬레이션 기준 서버 대수
+
+
+def annual_savings_per_server_kwh() -> float:
+    """전 시나리오 RL Best 절감을 연환산·평균낸 '서버 1대당 연 절감 kWh'.
+
+    각 시나리오는 1~2일 구간이므로 365일로 환산한 뒤 시나리오 간 평균을 내
+    특정 극단 조건(폭염/한파)에 치우치지 않은 대표 절감률을 얻는다.
+    캐시(simulate_compare_cached)를 그대로 재사용하므로 추가 시뮬 비용은 없다.
+    """
+    per_server: list[float] = []
+    for sc in list_scenarios():
+        result = simulate_compare_cached(sc)
+        days = sc.n_steps / STEPS_PER_DAY
+        annual_kwh = result["summary"]["best_savings_kwh"] / days * 365.0
+        per_server.append(annual_kwh / SIM_BASE_SERVERS)
+    return sum(per_server) / len(per_server) if per_server else 0.0
+
+
+def scale_savings(num_servers: int) -> dict:
+    """주어진 서버 대수에서 RL 도입 시 연간 절감 효과를 추정해 반환."""
+    per_server_kwh = annual_savings_per_server_kwh()
+    annual_kwh = per_server_kwh * num_servers
+    annual_krw = annual_kwh * ELECTRICITY_COST_KRW_PER_KWH
+    annual_co2_kg = annual_kwh * CARBON_FACTOR_KG_PER_KWH
+    return {
+        "num_servers":  num_servers,
+        "annual_kwh":   annual_kwh,
+        "annual_krw":   annual_krw,
+        "annual_co2_t": annual_co2_kg / 1000.0,
+    }
