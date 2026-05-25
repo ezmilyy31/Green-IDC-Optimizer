@@ -87,13 +87,22 @@ def rl_policy(model_path, algo: str = "auto"):
     if algo == "auto":
         with zipfile.ZipFile(model_path) as zf:
             data = json.loads(zf.read("data"))
-        algo = "sac" if "sac" in data.get("policy_class", {}).get("__module__", "").lower() else "ppo"
+        module = data.get("policy_class", {}).get("__module__", "").lower()
+        if "sac" in module:
+            algo = "sac"
+        elif "td3" in module:
+            algo = "td3"
+        else:
+            algo = "ppo"
 
     vecnorm_path = model_path.replace(".zip", "_vecnorm.pkl")
     dummy = DummyVecEnv([lambda: Monitor(IDCEnv())])
 
     if algo == "sac":
         model = SAC.load(model_path)
+    elif algo == "td3":
+        from stable_baselines3 import TD3
+        model = TD3.load(model_path)
     else:
         model = PPO.load(model_path)
 

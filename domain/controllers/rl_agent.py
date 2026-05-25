@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from stable_baselines3 import PPO, SAC
+from stable_baselines3 import PPO, SAC, TD3
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
@@ -207,6 +207,49 @@ def train(
         env.close()
         return save_path
 
+    if algo == "td3":
+        env = make_env(max_episode_steps, w_energy, custom_env, n_envs, reward_type, domain_randomize)
+        if resume:
+            print(f"[rl_agent] TD3 이어서 학습: {resume}")
+            stats_path = str(resume).replace(".zip", "") + "_vecnorm.pkl"
+            if Path(stats_path).exists():
+                env = VecNormalize.load(stats_path, env)
+                print(f"[rl_agent] VecNormalize 통계 복원: {stats_path}")
+            if freeze_vecnorm:
+                env.training = False
+                print("[rl_agent] VecNormalize 통계 동결 (training=False)")
+            model = TD3.load(resume, env=env, device=device, learning_rate=lr)
+        else:
+            model = TD3(
+                "MlpPolicy",
+                env,
+                learning_rate=lr,
+                buffer_size=200_000,
+                batch_size=batch_size,
+                gamma=gamma,
+                tau=0.005,
+                policy_delay=2,
+                target_policy_noise=0.2,
+                target_noise_clip=0.5,
+                policy_kwargs={"net_arch": [256, 256, 128]},
+                verbose=1,
+                tensorboard_log=None,
+                device=device,
+                seed=seed,
+            )
+        print(f"[rl_agent] TD3 학습 시작: {run_name}")
+        print(f"  lr={lr}, batch_size={batch_size}, gamma={gamma}")
+        print(f"  max_episode_steps={max_episode_steps}, w_energy={w_energy}, device={device}")
+        model.learn(total_timesteps=total_timesteps, callback=callbacks)
+        save_path = MODEL_DIR / run_name
+        model.save(str(save_path))
+        print(f"[rl_agent] TD3 모델 저장 완료: {save_path}.zip")
+        vecnorm_path = str(save_path) + "_vecnorm.pkl"
+        env.save(vecnorm_path)
+        print(f"[rl_agent] VecNormalize 통계 저장 완료: {vecnorm_path}")
+        env.close()
+        return save_path
+
     # PPO (기본)
     env = make_env(max_episode_steps, w_energy, custom_env, n_envs, reward_type, domain_randomize)
 
@@ -295,7 +338,7 @@ def parse_args():
     parser.add_argument("--custom-env", action="store_true", help="커스텀 IDC 환경 사용 (Sinergym 대신)")
     parser.add_argument("--ent-coef", type=float, default=0.0, help="entropy 보너스 계수 (탐색 강도)")
     parser.add_argument("--log-std-init", type=float, default=0.0, help="초기 action std (log scale)")
-    parser.add_argument("--algo", type=str, default="ppo", choices=["ppo", "sac"], help="RL 알고리즘 (ppo|sac)")
+    parser.add_argument("--algo", type=str, default="ppo", choices=["ppo", "sac", "td3"], help="RL 알고리즘 (ppo|sac|td3)")
     parser.add_argument("--n-envs", type=int, default=1, help="병렬 환경 수 (>1이면 SubprocVecEnv)")
     parser.add_argument("--reward-type", type=str, default="weighted", choices=["weighted", "hierarchical"],
                         help="보상 함수 타입: weighted(기존 가중합) | hierarchical(안전/효율 분리)")
